@@ -1,0 +1,18 @@
+{
+  "name": "fys-investment-bot",
+  "version": "1.0.0",
+  "description": "Telegram investment bot for FY'S PROPERTY with 3 packages, STK push, balance update, admin commands, and QR display",
+  "main": "telegram_bot.js",
+  "scripts": {
+    "start": "node telegram_bot.js"
+  },
+  "dependencies": {
+    "axios": "^0.27.2",
+    "express": "^4.18.2",
+    "node-telegram-bot-api": "^0.57.0",
+    "qrcode": "^1.5.1",
+    "qrcode-terminal": "^0.12.0"
+  },
+  "author": "FY'S PROPERTY 🕊️",
+  "license": "ISC"
+}
