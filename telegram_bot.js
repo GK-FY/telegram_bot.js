@@ -3,27 +3,31 @@
  *
  * Developer: FY'S PROPERTY 🕊️
  *
- * Minimal Telegram Investment Bot with:
- *  - 3 Packages (Silver, Gold, Platinum)
- *  - STK push integration via Pay Hero
- *  - 20s countdown (two updates at 10s and 20s)
- *  - Admin commands to edit texts, broadcast, and change channelID
- *  - Ignores group chats
- *  - No Express server or QR code references
+ * Telegram Investment Bot
+ * 
+ * Features:
+ *  - Three investment packages (Package 1: Min Ksh 1, Package 2: Min Ksh 2, Package 3: Min Ksh 3)
+ *  - Deposit flow: choose package, enter amount, then deposit number.
+ *  - Immediately sends an STK push to Pay Hero.
+ *  - Sends two countdown updates (at 10 and 20 seconds) then fetches transaction status.
+ *  - On success, automatically adds deposit to user's balance and sends a detailed confirmation.
+ *  - Users can check their balance with /balance.
+ *  - Admin commands (from admin ID 5415517965) to edit bot texts, change channelID, and broadcast messages.
+ *  - Configurable texts support placeholders:
+ *       {amount}, {package}, {depositNumber}, {seconds}, {mpesaCode}, {date}, {footer}
  */
 
 "use strict";
 
-const TelegramBot = require('node-telegram-bot-api');
-const axios = require('axios');
+const TelegramBot = require("node-telegram-bot-api");
+const axios = require("axios");
 
-// 1) Telegram bot token
+// === Bot Token & Admin ID ===
 const token = "6496106682:AAH4D4yMcYx4FKIyZem5akCQr6swjf_Z6pw";
+const ADMIN_ID = 5415517965;  // Admin's Telegram numeric ID
 
-// 2) Admin Telegram numeric ID (replace with your actual ID)
-const ADMIN_ID = 123456789;
-
-// 3) Editable bot configuration
+// === Editable Bot Configuration ===
+// Admin can change these via commands (edit command).
 let botConfig = {
   welcomeMessage: "👋 *Welcome to the Investment Bot by FY'S PROPERTY!* \nPlease choose one of our investment packages:",
   packageMessage: "You chose the *{package} Package*. Please enter the amount (in Ksh) you'd like to invest:",
@@ -32,24 +36,26 @@ let botConfig = {
   paymentSuccess: "*🎉 Payment Successful!*\n*Amount:* Ksh {amount}\n*Package:* {package}\n*Deposit Number:* {depositNumber}\n*MPESA Code:* {mpesaCode}\n*Date/Time:* {date}\n{footer}",
   paymentFooter: "Thank you for investing with FY'S PROPERTY! Type /start to invest again.",
   fromAdmin: "From Admin GK-FY",
-  channelID: 529
+  channelID: 529,
+  balanceMessage: "*💵 Your current investment balance is:* Ksh {balance}",
+  depositErrorMessage: "Sorry, an error occurred during your deposit. Please try again."
 };
 
-// 4) In-memory conversation state & user balances
-const userState = {};    // keyed by chatId => { stage, package, amount, depositNumber, stkRef }
-const userBalances = {}; // keyed by chatId => numeric
+// === In-Memory State ===
+const userState = {};    // chatId => { stage, package, amount, depositNumber, stkRef }
+const userBalances = {}; // chatId => number
 
-// 5) Investment packages
+// === Investment Packages ===
 const packages = [
-  { name: "Silver", min: 1000 },
-  { name: "Gold", min: 5000 },
-  { name: "Platinum", min: 10000 }
+  { name: "Package 1", min: 1 },
+  { name: "Package 2", min: 2 },
+  { name: "Package 3", min: 3 }
 ];
 
-// 6) Create the Telegram bot (polling mode)
+// === Create the Telegram Bot ===
 const bot = new TelegramBot(token, { polling: true });
 
-// HELPER: placeholders
+// === Helper: Replace placeholders in a template string ===
 function parsePlaceholders(template, data) {
   return template
     .replace(/{amount}/g, data.amount || "")
@@ -58,14 +64,15 @@ function parsePlaceholders(template, data) {
     .replace(/{seconds}/g, data.seconds || "")
     .replace(/{mpesaCode}/g, data.mpesaCode || "")
     .replace(/{date}/g, data.date || "")
-    .replace(/{footer}/g, botConfig.paymentFooter || "");
+    .replace(/{footer}/g, botConfig.paymentFooter || "")
+    .replace(/{balance}/g, data.balance || "");
 }
 
-// HELPER: STK push via Pay Hero
+// === Helper: Send STK push via Pay Hero API ===
 async function sendSTKPush(amount, depositNumber) {
   const payload = {
     amount: amount,
-    phone_number: depositNumber, // For demonstration, depositNumber is used as phone
+    phone_number: depositNumber, // For demo, depositNumber is used as phone
     channel_id: botConfig.channelID,
     provider: "m-pesa",
     external_reference: "INV-009",
@@ -91,7 +98,7 @@ async function sendSTKPush(amount, depositNumber) {
   }
 }
 
-// HELPER: fetch transaction status from Pay Hero
+// === Helper: Fetch transaction status from Pay Hero ===
 async function fetchTransactionStatus(ref) {
   try {
     const response = await axios.get(`https://backend.payhero.co.ke/api/v2/transaction-status?reference=${encodeURIComponent(ref)}`, {
@@ -106,50 +113,61 @@ async function fetchTransactionStatus(ref) {
   }
 }
 
-// HELPER: admin alerts
+// === Helper: Send alert message to admin ===
 function sendAdminAlert(text) {
   bot.sendMessage(ADMIN_ID, text, { parse_mode: "Markdown" });
 }
 
-// HELPER: parse broadcast command (like "msg [123456,987654] Hello!")
+// === Helper: Parse broadcast command ===
 function parseBroadcastCommand(msg) {
   const start = msg.indexOf("[");
   const end = msg.indexOf("]");
   if (start === -1 || end === -1) return null;
-  const idsStr = msg.substring(start + 1, end).trim();
+  const ids = msg.substring(start + 1, end).split(",").map(id => id.trim());
   const broadcastText = msg.substring(end + 1).trim();
-  const ids = idsStr.split(",").map(id => id.trim());
   return { ids, broadcastText };
 }
 
-// Admin help text
+// === Admin help text ===
 function getAdminHelp() {
   return (
     "*ADMIN COMMANDS:*\n" +
     "1) /admin - Show this help message.\n" +
     "2) edit <key> <newValue> - Edit a config value.\n" +
-    "   Valid keys: welcomeMessage, packageMessage, paymentInitiated, countdownUpdate, paymentSuccess, paymentFooter, fromAdmin, channelID\n" +
-    "3) /broadcast [chatId1,chatId2,...] Your message\n" +
-    "   Example: /broadcast [123456789,987654321] Hello from GK-FY!"
+    "   Valid keys: welcomeMessage, packageMessage, paymentInitiated, countdownUpdate, paymentSuccess, paymentFooter, fromAdmin, channelID, balanceMessage, depositErrorMessage\n" +
+    "   Example: edit welcomeMessage 👋 Hello from GK-FY! How much would you like to invest?\n" +
+    "3) /broadcast [chatId1,chatId2,...] Your message - Broadcast a message.\n" +
+    "   Example: /broadcast [123456789,987654321] Hello from Admin GK-FY!\n" +
+    "4) /balance - Check your current investment balance."
   );
 }
 
-// BOT: handle normal messages
+// === User Commands ===
+
+// When user sends /balance, show their balance.
+bot.onText(/\/balance/, (msg) => {
+  const chatId = msg.chat.id;
+  if (msg.chat.type !== "private") return;
+  const balance = userBalances[chatId] || 0;
+  const reply = parsePlaceholders(botConfig.balanceMessage, { balance: String(balance) });
+  bot.sendMessage(chatId, reply, { parse_mode: "Markdown" });
+});
+
+// === Main Message Handler ===
 bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
   const text = msg.text || "";
+  const lowerText = text.toLowerCase();
 
-  // Ignore group chats
+  // Ignore non-private chats.
   if (msg.chat.type !== "private") return;
 
-  // Admin commands
+  // --- Admin Commands ---
   if (msg.from.id === +ADMIN_ID) {
-    // /admin => show admin help
-    if (text.toLowerCase() === "/admin") {
+    if (lowerText === "/admin") {
       bot.sendMessage(chatId, getAdminHelp(), { parse_mode: "Markdown" });
       return;
     }
-    // edit <key> <newValue>
     if (text.startsWith("edit ")) {
       const parts = text.split(" ");
       if (parts.length < 3) {
@@ -157,9 +175,9 @@ bot.on("message", async (msg) => {
         return;
       }
       const key = parts[1];
-      const newValue = text.substring(("edit " + key + " ").length);
+      const newValue = text.substring(("edit " + key + " ").length).trim();
       if (!botConfig.hasOwnProperty(key)) {
-        bot.sendMessage(chatId, "*⚠️ Unknown key.* Valid keys: welcomeMessage, packageMessage, paymentInitiated, countdownUpdate, paymentSuccess, paymentFooter, fromAdmin, channelID", { parse_mode: "Markdown" });
+        bot.sendMessage(chatId, "*⚠️ Unknown key.* Valid keys: welcomeMessage, packageMessage, paymentInitiated, countdownUpdate, paymentSuccess, paymentFooter, fromAdmin, channelID, balanceMessage, depositErrorMessage", { parse_mode: "Markdown" });
         return;
       }
       if (key === "channelID") {
@@ -176,12 +194,11 @@ bot.on("message", async (msg) => {
       bot.sendMessage(chatId, `*${key}* updated successfully!`, { parse_mode: "Markdown" });
       return;
     }
-    // /broadcast ...
     if (text.startsWith("/broadcast ")) {
-      const cmdText = text.substring(11).trim();
-      const broadcast = parseBroadcastCommand(cmdText);
+      const commandText = text.substring(11).trim();
+      const broadcast = parseBroadcastCommand(commandText);
       if (!broadcast) {
-        bot.sendMessage(chatId, "*⚠️ Invalid format.* Use: /broadcast [chatId1,chatId2,...] message", { parse_mode: "Markdown" });
+        bot.sendMessage(chatId, "*⚠️ Invalid format.* Use: /broadcast [chatId1,chatId2,...] Your message", { parse_mode: "Markdown" });
         return;
       }
       const { ids, broadcastText } = broadcast;
@@ -196,10 +213,10 @@ bot.on("message", async (msg) => {
       bot.sendMessage(chatId, "*Message sent successfully to the specified users!*", { parse_mode: "Markdown" });
       return;
     }
-  }
+  } // End admin commands
 
-  // Deposit flow
-  if (text.toLowerCase() === "/start") {
+  // --- Deposit Flow ---
+  if (lowerText === "/start") {
     userState[chatId] = { stage: "packageSelection" };
     const keyboard = packages.map(pkg => ([{
       text: `${pkg.name} Package (Min Ksh ${pkg.min})`,
@@ -220,7 +237,6 @@ bot.on("message", async (msg) => {
 
   const state = userState[chatId];
 
-  // Stage: awaitingAmount
   if (state.stage === "awaitingAmount") {
     const amount = parseInt(text);
     if (isNaN(amount) || amount <= 0) {
@@ -242,14 +258,13 @@ bot.on("message", async (msg) => {
     return;
   }
 
-  // Stage: awaitingDepositNumber
   if (state.stage === "awaitingDepositNumber") {
     state.depositNumber = text;
     state.stage = "processing";
 
     const stkRef = await sendSTKPush(state.amount, state.depositNumber);
     if (!stkRef) {
-      bot.sendMessage(chatId, "*❌ Error:* Unable to initiate payment. Please try again later.", { parse_mode: "Markdown" });
+      bot.sendMessage(chatId, `*❌ Error:* ${botConfig.depositErrorMessage}`, { parse_mode: "Markdown" });
       delete userState[chatId];
       return;
     }
@@ -257,23 +272,17 @@ bot.on("message", async (msg) => {
 
     const attemptTime = new Date().toLocaleString("en-GB", { timeZone: "Africa/Nairobi" });
     sendAdminAlert(
-      `*💸 Deposit Attempt:*\n` +
-      `Amount: Ksh ${state.amount}\n` +
-      `Deposit Number: ${state.depositNumber}\n` +
-      `Package: ${state.package} Package\n` +
-      `Time (KE): ${attemptTime}`
+      `*💸 Deposit Attempt:*\nAmount: Ksh ${state.amount}\nDeposit Number: ${state.depositNumber}\nPackage: ${state.package} Package\nTime (KE): ${attemptTime}`
     );
 
     const initText = parsePlaceholders(botConfig.paymentInitiated, { seconds: "20" });
     bot.sendMessage(chatId, initText, { parse_mode: "Markdown" });
 
-    // After 10 seconds
     setTimeout(() => {
       const midText = parsePlaceholders(botConfig.countdownUpdate, { seconds: "10" });
       bot.sendMessage(chatId, midText, { parse_mode: "Markdown" });
     }, 10000);
 
-    // After 20 seconds => poll status
     setTimeout(async () => {
       const statusData = await fetchTransactionStatus(state.stkRef);
       if (!statusData) {
@@ -289,7 +298,6 @@ bot.on("message", async (msg) => {
       if (finalStatus === "SUCCESS") {
         if (!userBalances[chatId]) userBalances[chatId] = 0;
         userBalances[chatId] += state.amount;
-
         const successMsg = parsePlaceholders(botConfig.paymentSuccess, {
           amount: String(state.amount),
           package: state.package,
@@ -298,14 +306,8 @@ bot.on("message", async (msg) => {
           date: currentDateTime
         });
         bot.sendMessage(chatId, successMsg, { parse_mode: "Markdown" });
-
         sendAdminAlert(
-          `*✅ Deposit Successful:*\n` +
-          `Amount: Ksh ${state.amount}\n` +
-          `Deposit Number: ${state.depositNumber}\n` +
-          `Package: ${state.package} Package\n` +
-          `MPESA Code: ${providerReference}\n` +
-          `Time (KE): ${currentDateTime}`
+          `*✅ Deposit Successful:*\nAmount: Ksh ${state.amount}\nDeposit Number: ${state.depositNumber}\nPackage: ${state.package} Package\nMPESA Code: ${providerReference}\nTime (KE): ${currentDateTime}`
         );
       } else if (finalStatus === "FAILED") {
         let errMsg = "Your payment could not be completed. Please try again.";
@@ -316,12 +318,7 @@ bot.on("message", async (msg) => {
         }
         bot.sendMessage(chatId, `*❌ Payment Failed!* ${errMsg}\nType /start to try again.`, { parse_mode: "Markdown" });
         sendAdminAlert(
-          `*❌ Deposit Failed:*\n` +
-          `Amount: Ksh ${state.amount}\n` +
-          `Deposit Number: ${state.depositNumber}\n` +
-          `Package: ${state.package} Package\n` +
-          `Error: ${errMsg}\n` +
-          `Time (KE): ${currentDateTime}`
+          `*❌ Deposit Failed:*\nAmount: Ksh ${state.amount}\nDeposit Number: ${state.depositNumber}\nPackage: ${state.package} Package\nError: ${errMsg}\nTime (KE): ${currentDateTime}`
         );
       } else {
         bot.sendMessage(chatId, `*⏳ Payment Pending.* Current status: ${finalStatus}\nPlease wait a bit longer or contact support.\nType /start to restart.`, { parse_mode: "Markdown" });
@@ -333,28 +330,64 @@ bot.on("message", async (msg) => {
   }
 });
 
-// Callback queries for package selection
+// === Handle callback queries for package selection ===
 bot.on("callback_query", async (callbackQuery) => {
-  if (!callbackQuery || !callbackQuery.data) {
-    return;
-  }
+  if (!callbackQuery || !callbackQuery.data) return;
   const data = callbackQuery.data;
   const msg = callbackQuery.message;
-  if (!msg || !msg.chat) {
-    return;
-  }
+  if (!msg || !msg.chat) return;
   const chatId = msg.chat.id;
 
   if (data.startsWith("pkg:")) {
     const pkgName = data.split(":")[1];
-    bot.answerCallbackQuery(callbackQuery.id).catch(e => console.log("Callback error:", e));
     userState[chatId] = { stage: "awaitingAmount", package: pkgName };
+    try {
+      await bot.answerCallbackQuery(callbackQuery.id);
+    } catch (e) {
+      console.log("Callback error:", e);
+    }
     const pkgMsg = parsePlaceholders(botConfig.packageMessage, { package: pkgName });
     bot.sendMessage(chatId, pkgMsg, { parse_mode: "Markdown" });
   }
 });
 
-// Polling error handler
+// === Admin command: /admin ===
+bot.onText(/\/admin/, (msg) => {
+  if (msg.from.id === ADMIN_ID) {
+    bot.sendMessage(msg.chat.id, getAdminHelp(), { parse_mode: "Markdown" });
+  }
+});
+
+// === Admin broadcast command: /broadcast [id1,id2,...] message ===
+bot.onText(/\/broadcast (.+)/, async (msg, match) => {
+  if (msg.from.id !== ADMIN_ID) return;
+  const input = match[1];
+  const broadcast = parseBroadcastCommand(input);
+  if (!broadcast) {
+    bot.sendMessage(msg.chat.id, "*⚠️ Invalid format.* Use: /broadcast [chatId1,chatId2,...] Your message", { parse_mode: "Markdown" });
+    return;
+  }
+  const { ids, broadcastText } = broadcast;
+  for (let id of ids) {
+    try {
+      await bot.sendMessage(id, `*${botConfig.fromAdmin}:*\n${broadcastText}`, { parse_mode: "Markdown" });
+    } catch (err) {
+      console.error("Broadcast error:", err);
+      bot.sendMessage(msg.chat.id, `*⚠️ Could not send message to:* ${id}`, { parse_mode: "Markdown" });
+    }
+  }
+  bot.sendMessage(msg.chat.id, "*Message sent successfully to the specified users!*", { parse_mode: "Markdown" });
+});
+
+// === User command: /balance - check investment balance ===
+bot.onText(/\/balance/, (msg) => {
+  const chatId = msg.chat.id;
+  const balance = userBalances[chatId] || 0;
+  const reply = parsePlaceholders(botConfig.balanceMessage, { balance: String(balance) });
+  bot.sendMessage(chatId, reply, { parse_mode: "Markdown" });
+});
+
+// === Polling error handler ===
 bot.on("polling_error", (error) => {
   console.error("Polling error:", error);
 });
