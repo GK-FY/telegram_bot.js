@@ -3,24 +3,25 @@
  *
  * Developer: FY'S PROPERTY 🕊️
  *
- * Telegram Investment Bot with 3 packages (Silver, Gold, Platinum),
- * STK push integration via Pay Hero, and admin commands to edit messages,
- * broadcast messages, and change channelID. Group chats are ignored.
- *
- * Features defensive checks to avoid "undefined" property errors in callback queries.
+ * Minimal Telegram Investment Bot with:
+ *  - 3 Packages (Silver, Gold, Platinum)
+ *  - STK push integration via Pay Hero
+ *  - 20s countdown (two updates at 10s and 20s)
+ *  - Admin commands to edit texts, broadcast, and change channelID
+ *  - Ignores group chats
+ *  - No Express server or QR code references
  */
 
-// Required modules
+"use strict";
+
 const TelegramBot = require('node-telegram-bot-api');
-const express = require('express');
-const qrcode = require('qrcode-terminal');
 const axios = require('axios');
 
-// 1) Bot token
+// 1) Telegram bot token
 const token = "6496106682:AAH4D4yMcYx4FKIyZem5akCQr6swjf_Z6pw";
 
-// 2) Admin ID (replace with your numeric Telegram user ID)
-const ADMIN_ID = process.env.ADMIN_ID || 123456789;
+// 2) Admin Telegram numeric ID (replace with your actual ID)
+const ADMIN_ID = 123456789;
 
 // 3) Editable bot configuration
 let botConfig = {
@@ -34,45 +35,42 @@ let botConfig = {
   channelID: 529
 };
 
-// 4) In-memory user states and balances
-const userState = {};   // chatId => { stage, package, amount, depositNumber, stkRef }
-const userBalances = {}; // chatId => number
+// 4) In-memory conversation state & user balances
+const userState = {};    // keyed by chatId => { stage, package, amount, depositNumber, stkRef }
+const userBalances = {}; // keyed by chatId => numeric
 
-// 5) Packages
+// 5) Investment packages
 const packages = [
   { name: "Silver", min: 1000 },
   { name: "Gold", min: 5000 },
   { name: "Platinum", min: 10000 }
 ];
 
-// 6) Create bot with polling
+// 6) Create the Telegram bot (polling mode)
 const bot = new TelegramBot(token, { polling: true });
 
-// Keep track of the current QR code text for the Express server (optional).
-let currentQR = ""; // Not strictly needed for Telegram, but we keep for consistency.
-
-// HELPER: Replace placeholders
+// HELPER: placeholders
 function parsePlaceholders(template, data) {
   return template
-    .replace(/{amount}/g, data.amount || '')
-    .replace(/{package}/g, data.package || '')
-    .replace(/{depositNumber}/g, data.depositNumber || '')
-    .replace(/{seconds}/g, data.seconds || '')
-    .replace(/{mpesaCode}/g, data.mpesaCode || '')
-    .replace(/{date}/g, data.date || '')
-    .replace(/{footer}/g, botConfig.paymentFooter || '');
+    .replace(/{amount}/g, data.amount || "")
+    .replace(/{package}/g, data.package || "")
+    .replace(/{depositNumber}/g, data.depositNumber || "")
+    .replace(/{seconds}/g, data.seconds || "")
+    .replace(/{mpesaCode}/g, data.mpesaCode || "")
+    .replace(/{date}/g, data.date || "")
+    .replace(/{footer}/g, botConfig.paymentFooter || "");
 }
 
 // HELPER: STK push via Pay Hero
 async function sendSTKPush(amount, depositNumber) {
   const payload = {
     amount: amount,
-    phone_number: depositNumber, // depositNumber used as phone
+    phone_number: depositNumber, // For demonstration, depositNumber is used as phone
     channel_id: botConfig.channelID,
     provider: "m-pesa",
     external_reference: "INV-009",
     customer_name: "John Doe",
-    callback_url: "https://img-2-url.html-5.me/cl.php", // from your code
+    callback_url: "https://img-2-url.html-5.me/cl.php",
     account_reference: "FY'S PROPERTY",
     transaction_desc: "FY'S PROPERTY Payment",
     remarks: "FY'S PROPERTY",
@@ -80,10 +78,10 @@ async function sendSTKPush(amount, depositNumber) {
     companyName: "FY'S PROPERTY"
   };
   try {
-    const response = await axios.post('https://backend.payhero.co.ke/api/v2/payments', payload, {
+    const response = await axios.post("https://backend.payhero.co.ke/api/v2/payments", payload, {
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Basic QklYOXY0WlR4RUV4ZUJSOG1EdDY6c2lYb09taHRYSlFMbWZ0dFdqeGp4SG13NDFTekJLckl2Z2NWd2F1aw=='
+        "Content-Type": "application/json",
+        "Authorization": "Basic QklYOXY0WlR4RUV4ZUJSOG1EdDY6c2lYb09taHRYSlFMbWZ0dFdqeGp4SG13NDFTekJLckl2Z2NWd2F1aw=="
       }
     });
     return response.data.reference;
@@ -93,12 +91,12 @@ async function sendSTKPush(amount, depositNumber) {
   }
 }
 
-// HELPER: fetch transaction status
+// HELPER: fetch transaction status from Pay Hero
 async function fetchTransactionStatus(ref) {
   try {
     const response = await axios.get(`https://backend.payhero.co.ke/api/v2/transaction-status?reference=${encodeURIComponent(ref)}`, {
       headers: {
-        'Authorization': 'Basic QklYOXY0WlR4RUV4ZUJSOG1EdDY6c2lYb09taHRYSlFMbWZ0dFdqeGp4SG13NDFTekJLckl2Z2NWd2F1aw=='
+        "Authorization": "Basic QklYOXY0WlR4RUV4ZUJSOG1EdDY6c2lYb09taHRYSlFMbWZ0dFdqeGp4SG13NDFTekJLckl2Z2NWd2F1aw=="
       }
     });
     return response.data;
@@ -108,22 +106,23 @@ async function fetchTransactionStatus(ref) {
   }
 }
 
-// HELPER: send alert to admin
+// HELPER: admin alerts
 function sendAdminAlert(text) {
   bot.sendMessage(ADMIN_ID, text, { parse_mode: "Markdown" });
 }
 
-// HELPER: parse broadcast command
+// HELPER: parse broadcast command (like "msg [123456,987654] Hello!")
 function parseBroadcastCommand(msg) {
-  const start = msg.indexOf('[');
-  const end = msg.indexOf(']');
+  const start = msg.indexOf("[");
+  const end = msg.indexOf("]");
   if (start === -1 || end === -1) return null;
-  const ids = msg.substring(start + 1, end).split(',').map(id => id.trim());
+  const idsStr = msg.substring(start + 1, end).trim();
   const broadcastText = msg.substring(end + 1).trim();
+  const ids = idsStr.split(",").map(id => id.trim());
   return { ids, broadcastText };
 }
 
-// HELPER: admin help text
+// Admin help text
 function getAdminHelp() {
   return (
     "*ADMIN COMMANDS:*\n" +
@@ -136,19 +135,21 @@ function getAdminHelp() {
 }
 
 // BOT: handle normal messages
-bot.on('message', async (msg) => {
+bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
   const text = msg.text || "";
-  
-  // ignore group chats
-  if (msg.chat.type !== 'private') return;
-  
-  // If admin
+
+  // Ignore group chats
+  if (msg.chat.type !== "private") return;
+
+  // Admin commands
   if (msg.from.id === +ADMIN_ID) {
-    if (text.toLowerCase() === "admin") {
+    // /admin => show admin help
+    if (text.toLowerCase() === "/admin") {
       bot.sendMessage(chatId, getAdminHelp(), { parse_mode: "Markdown" });
       return;
     }
+    // edit <key> <newValue>
     if (text.startsWith("edit ")) {
       const parts = text.split(" ");
       if (parts.length < 3) {
@@ -156,7 +157,7 @@ bot.on('message', async (msg) => {
         return;
       }
       const key = parts[1];
-      const newValue = text.substring(("edit " + key + " ").length).trim();
+      const newValue = text.substring(("edit " + key + " ").length);
       if (!botConfig.hasOwnProperty(key)) {
         bot.sendMessage(chatId, "*⚠️ Unknown key.* Valid keys: welcomeMessage, packageMessage, paymentInitiated, countdownUpdate, paymentSuccess, paymentFooter, fromAdmin, channelID", { parse_mode: "Markdown" });
         return;
@@ -175,11 +176,12 @@ bot.on('message', async (msg) => {
       bot.sendMessage(chatId, `*${key}* updated successfully!`, { parse_mode: "Markdown" });
       return;
     }
+    // /broadcast ...
     if (text.startsWith("/broadcast ")) {
-      const commandText = text.substring(11).trim();
-      const broadcast = parseBroadcastCommand(commandText);
+      const cmdText = text.substring(11).trim();
+      const broadcast = parseBroadcastCommand(cmdText);
       if (!broadcast) {
-        bot.sendMessage(chatId, "*⚠️ Invalid format.* Use: /broadcast [chatId1,chatId2,...] Your message", { parse_mode: "Markdown" });
+        bot.sendMessage(chatId, "*⚠️ Invalid format.* Use: /broadcast [chatId1,chatId2,...] message", { parse_mode: "Markdown" });
         return;
       }
       const { ids, broadcastText } = broadcast;
@@ -195,8 +197,8 @@ bot.on('message', async (msg) => {
       return;
     }
   }
-  
-  // deposit flow
+
+  // Deposit flow
   if (text.toLowerCase() === "/start") {
     userState[chatId] = { stage: "packageSelection" };
     const keyboard = packages.map(pkg => ([{
@@ -209,22 +211,22 @@ bot.on('message', async (msg) => {
     });
     return;
   }
-  
+
   if (!userState[chatId]) {
     userState[chatId] = { stage: "packageSelection" };
     bot.sendMessage(chatId, botConfig.welcomeMessage, { parse_mode: "Markdown" });
     return;
   }
-  
+
   const state = userState[chatId];
-  
+
+  // Stage: awaitingAmount
   if (state.stage === "awaitingAmount") {
     const amount = parseInt(text);
     if (isNaN(amount) || amount <= 0) {
       bot.sendMessage(chatId, "*⚠️ Please enter a valid deposit amount in Ksh.*", { parse_mode: "Markdown" });
       return;
     }
-    // check min deposit
     const pkg = packages.find(p => p.name === state.package);
     if (amount < pkg.min) {
       bot.sendMessage(chatId, `*⚠️ The minimum deposit for the ${pkg.name} Package is Ksh ${pkg.min}.*`, { parse_mode: "Markdown" });
@@ -239,11 +241,12 @@ bot.on('message', async (msg) => {
     bot.sendMessage(chatId, replyText, { parse_mode: "Markdown" });
     return;
   }
-  
+
+  // Stage: awaitingDepositNumber
   if (state.stage === "awaitingDepositNumber") {
     state.depositNumber = text;
     state.stage = "processing";
-    
+
     const stkRef = await sendSTKPush(state.amount, state.depositNumber);
     if (!stkRef) {
       bot.sendMessage(chatId, "*❌ Error:* Unable to initiate payment. Please try again later.", { parse_mode: "Markdown" });
@@ -251,7 +254,7 @@ bot.on('message', async (msg) => {
       return;
     }
     state.stkRef = stkRef;
-    
+
     const attemptTime = new Date().toLocaleString("en-GB", { timeZone: "Africa/Nairobi" });
     sendAdminAlert(
       `*💸 Deposit Attempt:*\n` +
@@ -260,15 +263,17 @@ bot.on('message', async (msg) => {
       `Package: ${state.package} Package\n` +
       `Time (KE): ${attemptTime}`
     );
-    
-    const initText = parsePlaceholders(botConfig.paymentInitiated, { seconds: '20' });
+
+    const initText = parsePlaceholders(botConfig.paymentInitiated, { seconds: "20" });
     bot.sendMessage(chatId, initText, { parse_mode: "Markdown" });
-    
+
+    // After 10 seconds
     setTimeout(() => {
-      const midText = parsePlaceholders(botConfig.countdownUpdate, { seconds: '10' });
+      const midText = parsePlaceholders(botConfig.countdownUpdate, { seconds: "10" });
       bot.sendMessage(chatId, midText, { parse_mode: "Markdown" });
     }, 10000);
-    
+
+    // After 20 seconds => poll status
     setTimeout(async () => {
       const statusData = await fetchTransactionStatus(state.stkRef);
       if (!statusData) {
@@ -280,10 +285,11 @@ bot.on('message', async (msg) => {
       const providerReference = statusData.provider_reference || "";
       const resultDesc = statusData.ResultDesc || "";
       const currentDateTime = new Date().toLocaleString("en-GB", { timeZone: "Africa/Nairobi" });
-      
+
       if (finalStatus === "SUCCESS") {
         if (!userBalances[chatId]) userBalances[chatId] = 0;
         userBalances[chatId] += state.amount;
+
         const successMsg = parsePlaceholders(botConfig.paymentSuccess, {
           amount: String(state.amount),
           package: state.package,
@@ -292,7 +298,7 @@ bot.on('message', async (msg) => {
           date: currentDateTime
         });
         bot.sendMessage(chatId, successMsg, { parse_mode: "Markdown" });
-        
+
         sendAdminAlert(
           `*✅ Deposit Successful:*\n` +
           `Amount: Ksh ${state.amount}\n` +
@@ -303,28 +309,33 @@ bot.on('message', async (msg) => {
         );
       } else if (finalStatus === "FAILED") {
         let errMsg = "Your payment could not be completed. Please try again.";
-        if (resultDesc.toLowerCase().includes('insufficient')) {
+        if (resultDesc.toLowerCase().includes("insufficient")) {
           errMsg = "Insufficient funds in your account.";
-        } else if (resultDesc.toLowerCase().includes('wrong pin') || resultDesc.toLowerCase().includes('incorrect pin')) {
+        } else if (resultDesc.toLowerCase().includes("wrong pin") || resultDesc.toLowerCase().includes("incorrect pin")) {
           errMsg = "The PIN you entered is incorrect.";
         }
         bot.sendMessage(chatId, `*❌ Payment Failed!* ${errMsg}\nType /start to try again.`, { parse_mode: "Markdown" });
         sendAdminAlert(
-          `*❌ Deposit Failed:*\nAmount: Ksh ${state.amount}\nDeposit Number: ${state.depositNumber}\nPackage: ${state.package} Package\nError: ${errMsg}\nTime (KE): ${currentDateTime}`
+          `*❌ Deposit Failed:*\n` +
+          `Amount: Ksh ${state.amount}\n` +
+          `Deposit Number: ${state.depositNumber}\n` +
+          `Package: ${state.package} Package\n` +
+          `Error: ${errMsg}\n` +
+          `Time (KE): ${currentDateTime}`
         );
       } else {
         bot.sendMessage(chatId, `*⏳ Payment Pending.* Current status: ${finalStatus}\nPlease wait a bit longer or contact support.\nType /start to restart.`, { parse_mode: "Markdown" });
       }
       delete userState[chatId];
     }, 20000);
+
     return;
   }
 });
 
-// Handle callback queries for package selection
-bot.on('callback_query', async (callbackQuery) => {
+// Callback queries for package selection
+bot.on("callback_query", async (callbackQuery) => {
   if (!callbackQuery || !callbackQuery.data) {
-    // Defensive check in case callbackQuery is missing
     return;
   }
   const data = callbackQuery.data;
@@ -338,45 +349,14 @@ bot.on('callback_query', async (callbackQuery) => {
     const pkgName = data.split(":")[1];
     bot.answerCallbackQuery(callbackQuery.id).catch(e => console.log("Callback error:", e));
     userState[chatId] = { stage: "awaitingAmount", package: pkgName };
-    const pkgMsg = parsePlaceholders(botConfig.packageMessage, { amount: "{amount}", package: pkgName });
+    const pkgMsg = parsePlaceholders(botConfig.packageMessage, { package: pkgName });
     bot.sendMessage(chatId, pkgMsg, { parse_mode: "Markdown" });
   }
 });
 
-// Listen for polling errors to avoid crashing
+// Polling error handler
 bot.on("polling_error", (error) => {
   console.error("Polling error:", error);
 });
 
 console.log("Telegram Investment Bot by FY'S PROPERTY starting...");
-
-// EXPRESS server to show the "QR code" for the Telegram Bot. (Optional for demonstration)
-const express = require('express');
-const app = express();
-const port = process.env.PORT || 3000;
-
-app.get('/', (req, res) => {
-  // Telegram doesn't typically do a QR code approach like WhatsApp, but we can
-  // just show a placeholder or instructions. Or we can generate a link to "https://t.me/<bot_username>"
-  // For demonstration, we just show instructions:
-  res.send(`
-    <html>
-      <head>
-        <title>FY'S PROPERTY - Telegram Bot</title>
-        <style>
-          body { background: #222; color: #fff; font-family: Arial; text-align: center; padding: 20px; }
-          h1 { color: #12c99b; }
-        </style>
-      </head>
-      <body>
-        <h1>FY'S PROPERTY Telegram Bot</h1>
-        <p>This bot uses token: <b>${token}</b></p>
-        <p>Just open Telegram and search for your bot username to start chatting.</p>
-      </body>
-    </html>
-  `);
-});
-
-app.listen(port, () => {
-  console.log(`Express server running on port ${port}`);
-});
