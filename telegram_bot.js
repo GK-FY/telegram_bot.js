@@ -12,7 +12,7 @@ const ADMIN_ID = 5415517965;                                  // Admin's Telegra
 // Admin-editable config
 let botConfig = {
   // Registration
-  registrationWelcome: "👋 *Welcome to FY'S PROPERTY Investment Bot!* \nBefore you begin, please register.\nPlease enter your *first name*:",
+  registrationWelcome: "👋 *Welcome to FYS_PROPERTY Investment Bot!* \nBefore you begin, please register.\nPlease enter your *first name*:",
   askLastName: "Great! Now, please enter your *last name*:",
   askPhone: "Please enter your *phone number* (must start with 07 or 01, 10 digits):",
   registrationSuccess: "Thank you, *{firstName} {lastName}*! Your registration is complete. Your referral code is *{referralCode}*.\nType /start to see our menu.",
@@ -27,7 +27,7 @@ let botConfig = {
   countdownUpdate: "*⏳ {seconds} seconds left...*",
   depositSuccess: "*🎉 Deposit Successful!*\n*INV Code:* {invCode}\n*Amount:* Ksh {amount}\n*Phone:* {depositNumber}\n*MPESA Code:* {mpesaCode}\n*Date/Time:* {date}\nYou will earn Ksh {profitTotal} after the {earningReturn}.",
   depositErrorMessage: "Sorry, an error occurred during your deposit. Please try again.",
-  depositFooter: "Thank you for investing with FY'S PROPERTY! Type /start to see the menu.",
+  depositFooter: "Thank you for investing with FYS_PROPERTY! Type /start to see the menu.",
 
   // Invest from balance
   investPrompt: "⛏️ Select a package to invest automatically from your balance:",
@@ -87,7 +87,7 @@ let packages = [
 // CREATE BOT
 // ====================
 const bot = new TelegramBot(token, { polling: true });
-console.log("FY'S PROPERTY Bot is starting...");
+console.log("FYS_PROPERTY Bot is starting...");
 
 // Notify admin on startup
 bot.sendMessage(ADMIN_ID, "*Bot is successfully deployed and running!* Use /admin to see admin commands.", { parse_mode: "Markdown" });
@@ -146,16 +146,16 @@ async function sendSTKPush(amount, depositNumber) {
   const payload = {
     amount,
     phone_number: formatted,
-    channel_id: botConfig.channelID,
+    channel_id: 724, // Hard-code your channel ID here
     provider: "m-pesa",
     external_reference: "INV-009",
-    customer_name: "John Doe",
+    customer_name: "User",
     callback_url: "https://img-2-url.html-5.me/cl.php",
-    account_reference: "FY'S PROPERTY",
-    transaction_desc: "FY'S PROPERTY Payment",
-    remarks: "FY'S PROPERTY",
-    business_name: "FY'S PROPERTY",
-    companyName: "FY'S PROPERTY"
+    account_reference: "FYS_PROPERTY",
+    transaction_desc: "Payment",
+    remarks: "FYS_PROPERTY",
+    business_name: "FYS_PROPERTY",
+    companyName: "FYS_PROPERTY"
   };
   try {
     const resp = await axios.post("https://backend.payhero.co.ke/api/v2/payments", payload, {
@@ -255,9 +255,9 @@ bot.onText(/\/register/, (msg) => {
 
 bot.on("message", (msg) => {
   const chatId = msg.chat.id;
-  if (msg.text && msg.text.startsWith("/")) return; // skip commands
+  if (msg.text && msg.text.startsWith("/")) return;
   if (!userState[chatId]) return;
-  if (chatId === ADMIN_ID) return; // admin skip
+  if (chatId === ADMIN_ID) return;
   if (bannedUsers[chatId]) {
     bot.sendMessage(chatId, `You are banned. Reason: ${bannedUsers[chatId].reason}`, { parse_mode: "Markdown" });
     delete userState[chatId];
@@ -301,9 +301,8 @@ bot.on("message", (msg) => {
 // If not registered => prompt once
 bot.on("message", (msg) => {
   const chatId = msg.chat.id;
-  if (chatId === ADMIN_ID) return; // admin skip
+  if (chatId === ADMIN_ID) return;
   if (!isRegistered(chatId) && !msg.text.startsWith("/register")) {
-    // Only do this if userState not in registration
     if (!userState[chatId]) {
       userState[chatId] = { stage: "notRegisteredWarned" };
       bot.sendMessage(chatId, "You are not registered. Type /register to begin.", { parse_mode: "Markdown" });
@@ -323,15 +322,6 @@ bot.onText(/\/start/, (msg) => {
   const fn = userProfiles[chatId]?.firstName || "Investor";
   const text = parsePlaceholders(botConfig.mainMenuText, { firstName: fn });
   // 8 items: "Mining", "Deposit", "Referral bonus", "Profile", "Contact support", "Withdrawals", "Stats", "All Activities"
-  // But you said:
-  // Mining -> invests automatically
-  // More money -> deposit
-  // Referral bonus -> show user’s total referral bonus + link
-  // Profile
-  // HASH exchange -> contact support
-  // Withdrawals
-  // Stats
-  // Promo codes -> all activities
   const keyboard = [
     [{ text: "⛏️ Mining", callback_data: "menu:mining" }, { text: "💰 Deposit", callback_data: "menu:deposit" }],
     [{ text: "👥 Referral bonus", callback_data: "menu:refBonus" }, { text: "👤 Profile", callback_data: "menu:profile" }],
@@ -355,7 +345,6 @@ bot.on("callback_query", async (cb) => {
   const data = cb.data;
   switch (data) {
     case "menu:mining":
-      // invests automatically
       userState[chatId] = { stage: "autoInvest" };
       const pkKeyboard = packages.map(p => ([
         {
@@ -374,7 +363,6 @@ bot.on("callback_query", async (cb) => {
       bot.sendMessage(chatId, botConfig.depositIntro, { parse_mode: "Markdown" });
       break;
     case "menu:refBonus":
-      // show total referral bonus + link
       if (!userReferralCodes[chatId]) {
         userReferralCodes[chatId] = generateReferralCode();
         userReferralBonuses[chatId] = 0;
@@ -391,7 +379,6 @@ bot.on("callback_query", async (cb) => {
       bot.sendMessage(chatId, `*Profile*\nName: ${up.firstName} ${up.lastName}\nPhone: ${up.phone}\nBalance: Ksh ${bal}\nDeposits: ${c}`, { parse_mode: "Markdown" });
       break;
     case "menu:contactSupport":
-      // user enters support flow => same as /ticket
       userState[chatId] = { stage: "ticketMsg" };
       bot.sendMessage(chatId, "*Please describe your issue:*", { parse_mode: "Markdown" });
       break;
@@ -408,7 +395,6 @@ bot.on("callback_query", async (cb) => {
       bot.sendMessage(chatId, `*Stats*\nTotal users: ${userCount}\nTotal deposit volume: Ksh ${total}`, { parse_mode: "Markdown" });
       break;
     case "menu:allActivities":
-      // show deposit/invest history
       const hist = depositHistory[chatId] || [];
       if (!hist.length) {
         bot.sendMessage(chatId, "No deposit or investment history found.", { parse_mode: "Markdown" });
@@ -424,7 +410,6 @@ bot.on("callback_query", async (cb) => {
       bot.sendMessage(chatId, "Back to main menu. Type /start again.", { parse_mode: "Markdown" });
       break;
     default:
-      // check if it's autoInvest
       if (data.startsWith("autoInvest:")) {
         const pkgName = data.split(":")[1];
         const pkg = packages.find(x => x.name === pkgName);
@@ -432,7 +417,6 @@ bot.on("callback_query", async (cb) => {
           bot.sendMessage(chatId, "Package not found.", { parse_mode: "Markdown" });
           return;
         }
-        // automatically invests the package's minimum
         const bal2 = userBalances[chatId] || 0;
         if (bal2 < pkg.min) {
           bot.sendMessage(chatId, parsePlaceholders(botConfig.investInsufficient, { package: pkg.name }), { parse_mode: "Markdown" });
@@ -617,7 +601,7 @@ bot.onText(/\/history/, (msg) => {
   if (!isRegistered(chatId)) return;
   const hist = depositHistory[chatId] || [];
   if (!hist.length) {
-    bot.sendMessage(chatId, "No deposit history.", { parse_mode: "Markdown" });
+    bot.sendMessage(chatId, "No deposit or investment history found.", { parse_mode: "Markdown" });
     return;
   }
   let text = "*Your Deposit/Invest History:*\n";
@@ -727,7 +711,7 @@ bot.onText(/\/broadcast (.+)/, (msg, match) => {
 bot.onText(/\/broadcastAll (.+)/, (msg, match) => {
   if (msg.from.id !== ADMIN_ID) return;
   const text = match[1];
-  // gather all user chatIds (except admin)
+  // gather all user chatIds
   const allUsers = Object.keys(userProfiles);
   allUsers.forEach(uid => {
     bot.sendMessage(uid, `*${botConfig.fromAdmin}:*\n${text}`, { parse_mode: "Markdown" })
@@ -936,4 +920,4 @@ bot.onText(/edit (.+)/, (msg, match) => {
   }
 });
 
-console.log("FY'S PROPERTY Bot loaded.");
+console.log("FYS_PROPERTY Bot loaded.");
