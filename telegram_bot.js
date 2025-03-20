@@ -9,52 +9,70 @@ const axios = require("axios");
 const token = "6496106682:AAH4D4yMcYx4FKIyZem5akCQr6swjf_Z6pw"; // Your Bot Token
 const ADMIN_ID = 5415517965; // Admin's Telegram ID
 
-// Editable settings (admin can change via /edit)
+// System maintenance mode and custom maintenance message
+let maintenanceMode = false;
+let maintenanceMessage = "⚙️ The system is under maintenance. Please try again later.";
+
+// Editable settings (admin can change these via /edit)
 let botConfig = {
   // Registration texts
   registrationWelcome: "👋 *Welcome to FYS_PROPERTY Investment Bot!* \nBefore you begin, please register.\nEnter your *first name*:",
   askLastName: "Great! Now, please enter your *last name*:",
   askPhone: "Please enter your *phone number* (must start with 07 or 01, 10 digits):",
   registrationSuccess: "Thank you, *{firstName} {lastName}*! Your registration is complete. Your referral code is *{referralCode}*.\nType /start to see our menu.",
-
+  
   // Main menu text
   mainMenuText: "Hello, *{firstName}*! Please select an option below:",
-
+  
   // Deposit flow (for adding funds)
   depositIntro: "💰 *Deposit Flow Started!* Please enter the deposit amount in Ksh:",
   depositPhonePrompt: "📱 Now enter your M-PESA phone number (start with 07 or 01):",
   paymentInitiated: "*⏳ Payment initiated!* We'll check status in {seconds} seconds...\n_Stay tuned!_",
   countdownUpdate: "*⏳ {seconds} seconds left...*",
-  // Removed any mention of future earnings from deposit success
+  // Deposit success (no future earnings text)
   depositSuccess: "*🎉 Deposit Successful!*\n*INV Code:* {invCode}\n*Amount:* Ksh {amount}\n*Phone:* {depositNumber}\n*MPESA Code:* {mpesaCode}\n*Date/Time:* {date}",
   depositErrorMessage: "Sorry, an error occurred during your deposit. Please try again.",
   depositFooter: "Thank you for using FYS_PROPERTY! Type /start to see the menu.",
-
-  // Invest (auto-invest via Mining) – only triggered when user chooses Mining
+  
+  // Invest (auto‑invest via Mining)
   investPrompt: "⛏️ Select a package to invest automatically from your balance:",
   investInsufficient: "*⚠️ You do not have enough balance to invest in {package}. Please deposit first.*",
   investSuccess: "*🎉 Investment Created!*\n*INV Code:* {invCode}\nPackage: {package}\nAmount: Ksh {amount}",
-
+  
   // Referral: shows referral code and link
   referralBonus: 200,
-  botUsername: "shankfy_bot", // used for referral link
-
+  botUsername: "shankfy_bot", // for referral link
+  
   // Balance message
   balanceMessage: "*💵 Your current balance is:* Ksh {balance}",
-
-  // Withdrawal flow (with fee of 6%)
+  
+  // Withdrawal flow (6% fee applies)
   withdrawPrompt: "💸 *Withdrawal Requested!* Please enter the amount to withdraw (min Ksh {min}, max Ksh {max}):",
   askWithdrawNumber: "Now, enter your M-PESA number (start with 07 or 01, 10 digits):",
   withdrawMin: 1,
   withdrawMax: 75000,
-  withdrawalFeePercent: 6, // 6% fee
-
+  withdrawalFeePercent: 6,
+  
   // Admin
   fromAdmin: "shankfy_bot",
-
+  
   // Additional user help
-  userHelp: "Main commands:\n/start - Show main menu\n/deposit - Deposit funds\n/balance - Check balance\n/withdraw - Request withdrawal\n/invest - Invest from balance\n/history - View your activities\n/myreferral - View your referral code & link\n/profile - View your profile\n/faq - FAQs\n/ticket - Support ticket\n/help - Help"
+  userHelp: "Main commands:\n/start - Show main menu\n/deposit - Deposit funds\n/balance - Check balance\n/withdraw - Request withdrawal\n/invest - Invest from balance\n/history - View your activities\n/myreferral - View your referral code & link\n/profile - View your profile\n/faq - FAQs\n/ticket - Support ticket\n/help - Help\n/inspire - Get inspired\n/feedback - Send feedback\n/about - About this bot\n/uptime - Bot uptime"
 };
+
+// ====================
+// EXTRA FEATURES & ADMIN LOG
+// ====================
+let adminLog = []; // Array of log strings
+const botStartTime = Date.now();
+
+const motivationalQuotes = [
+  "Believe you can and you're halfway there. – Theodore Roosevelt",
+  "Your limitation—it’s only your imagination.",
+  "Push yourself, because no one else is going to do it for you.",
+  "Great things never come from comfort zones.",
+  "Dream it. Wish it. Do it."
+];
 
 // ====================
 // IN-MEMORY DATA STORAGE
@@ -86,11 +104,38 @@ let packages = [
 const bot = new TelegramBot(token, { polling: true });
 console.log("FYS_PROPERTY Bot is starting...");
 
-// Alert admin on startup and for new user messages (first contact)
-bot.sendMessage(ADMIN_ID, "*Bot is successfully deployed and running!* Use /admin to see admin commands.", { parse_mode: "Markdown" });
+// ====================
+// MAINTENANCE CHECK WRAPPER
+// ====================
+function maintenanceCheck(chatId, callback) {
+  if (maintenanceMode && chatId !== ADMIN_ID) {
+    bot.sendMessage(chatId, maintenanceMessage, { parse_mode: "Markdown" });
+    return;
+  }
+  callback();
+}
 
-// Polling error handler
-bot.on("polling_error", (err) => console.error("Polling error:", err));
+// ====================
+// ADMIN LOGGING FUNCTION
+// ====================
+function logAdmin(message) {
+  const timeStr = new Date().toLocaleString();
+  adminLog.push(`[${timeStr}] ${message}`);
+  // Optionally, also send a quick alert to admin
+  sendAdminAlert(message);
+}
+
+// Alert admin on new unregistered user (only once)
+bot.on("message", (msg) => {
+  const chatId = msg.chat.id;
+  if (chatId === ADMIN_ID) return;
+  if (!isRegistered(chatId)) {
+    if (!userState[chatId] || userState[chatId].stage !== "notRegisteredWarned") {
+      logAdmin(`New unregistered user (Chat ID: ${chatId}) said: ${msg.text}`);
+      userState[chatId] = { stage: "notRegisteredWarned" };
+    }
+  }
+});
 
 // ====================
 // HELPER FUNCTIONS
@@ -134,7 +179,7 @@ function generateReferralCode() {
   return "FY'S-" + Math.floor(10000 + Math.random() * 90000);
 }
 
-// STK push to Pay Hero (using plain strings to avoid issues with apostrophes)
+// STK push (simplified strings)
 async function sendSTKPush(amount, depositNumber) {
   const formatted = formatPhoneNumber(depositNumber);
   const payload = {
@@ -183,73 +228,217 @@ function sendAdminAlert(text) {
   bot.sendMessage(ADMIN_ID, text, { parse_mode: "Markdown" });
 }
 
-// For admin help, include examples in the help text
-function getAdminHelp() {
-  return (
-`*ADMIN COMMANDS:*
-• /admin - Show this help.
-• edit <key> <newValue>  
-  Valid keys: registrationWelcome, askLastName, askPhone, registrationSuccess, mainMenuText, depositIntro, depositPhonePrompt, depositErrorMessage, depositFooter, paymentInitiated, countdownUpdate, depositSuccess, fromAdmin, channelID, balanceMessage, referralBonus, withdrawMin, withdrawMax, profitRate, earningReturn  
-  Example: \`edit profitRate 12\`
-• /broadcast [chatId1,chatId2,...] message  
-  Example: \`/broadcast [12345678,87654321] Hello users!\`
-• /broadcastAll <message> - Send message to all registered users.
-• /addpackage <name> <min>  
-  Example: \`/addpackage Package4 4\`
-• /editpackage <name> <newMin>  
-  Example: \`/editpackage Package1 2\`
-• /referrals - List pending referrals.
-• approve <id> / decline <id> - Approve or decline a referral.
-• /withdrawlimits - Show withdrawal limits.
-• /users - List registered users.
-• ban <chatId> <reason> / unban <chatId> - Ban or unban a user.
-• adjust <chatId> <amount> - Add (or deduct with a negative amount) from a user’s balance.
-• /investment <chatId> - Show last investment of a user.
-• /tickets - List support tickets.
-• replyticket <id> <message> - Reply to a support ticket.
-• Additionally, every deposit, withdrawal, registration, and support ticket creation alerts the admin automatically.
-`
-  );
+// ====================
+// EXTRA FEATURES
+// ====================
+
+// Uptime command – /uptime
+function getUptime() {
+  const diff = Date.now() - botStartTime;
+  const seconds = Math.floor(diff / 1000) % 60;
+  const minutes = Math.floor(diff / (1000 * 60)) % 60;
+  const hours = Math.floor(diff / (1000 * 60 * 60));
+  return `${hours}h ${minutes}m ${seconds}s`;
+}
+
+// Inspirational quote – /inspire
+function getRandomQuote() {
+  const quotes = motivationalQuotes;
+  return quotes[Math.floor(Math.random() * quotes.length)];
+}
+
+// About command – /about
+function getAbout() {
+  return "FYS_PROPERTY Investment Bot v1.0\nDeveloped by FY'S PROPERTY 🕊️\nEnjoy our services and happy investing!";
+}
+
+// Leaderboard – /leaderboard: top 5 users by deposit volume
+function getLeaderboard() {
+  let leaderboard = [];
+  for (let uid in depositHistory) {
+    const total = depositHistory[uid].reduce((sum, rec) => sum + rec.amount, 0);
+    leaderboard.push({ uid, total });
+  }
+  leaderboard.sort((a, b) => b.total - a.total);
+  return leaderboard.slice(0, 5);
 }
 
 // ====================
-// ADMIN ALERTS FOR NEW USER MESSAGES
+// ADMIN LOG: record any key actions
 // ====================
-// When a new user (not registered) sends a message for the first time, alert admin.
+let adminLog = [];
+function logAdmin(message) {
+  const timeStr = new Date().toLocaleString();
+  const logEntry = `[${timeStr}] ${message}`;
+  adminLog.push(logEntry);
+  sendAdminAlert(logEntry);
+}
+
+// ====================
+// MAINTENANCE MODE COMMANDS (admin only)
+// ====================
+bot.onText(/\/maintenance (on|off)/, (msg, match) => {
+  if (msg.from.id !== ADMIN_ID) return;
+  maintenanceMode = (match[1] === "on");
+  bot.sendMessage(ADMIN_ID, `Maintenance mode turned ${maintenanceMode ? "ON" : "OFF"}.`, { parse_mode: "Markdown" });
+});
+
+bot.onText(/\/maintenanceMsg (.+)/, (msg, match) => {
+  if (msg.from.id !== ADMIN_ID) return;
+  maintenanceMessage = match[1];
+  bot.sendMessage(ADMIN_ID, `Maintenance message updated to: ${maintenanceMessage}`, { parse_mode: "Markdown" });
+});
+
+// ====================
+// AUTO-REPLY FEATURE: if user sends "hello" (case-insensitive)
+bot.on("message", (msg) => {
+  const chatId = msg.chat.id;
+  if (typeof msg.text !== "string") return;
+  if (/^hello$/i.test(msg.text.trim()) && isRegistered(chatId) && !maintenanceMode) {
+    bot.sendMessage(chatId, "Hi there! How can I help you today? 😊", { parse_mode: "Markdown" });
+  }
+});
+
+// ====================
+// USER FEEDBACK COMMAND: /feedback
+bot.onText(/\/feedback (.+)/, (msg, match) => {
+  const chatId = msg.chat.id;
+  if (!isRegistered(chatId)) return;
+  const feedback = match[1];
+  bot.sendMessage(chatId, "Thank you for your feedback! 🙏", { parse_mode: "Markdown" });
+  sendAdminAlert(`Feedback from ${chatId}: ${feedback}`);
+});
+
+// ====================
+// USER COMMANDS
+// ====================
+
+// /about command
+bot.onText(/\/about/, (msg) => {
+  bot.sendMessage(msg.chat.id, getAbout(), { parse_mode: "Markdown" });
+});
+
+// /uptime command
+bot.onText(/\/uptime/, (msg) => {
+  bot.sendMessage(msg.chat.id, `Bot uptime: ${getUptime()}`, { parse_mode: "Markdown" });
+});
+
+// /leaderboard command
+bot.onText(/\/leaderboard/, (msg) => {
+  const leaderboard = getLeaderboard();
+  if (!leaderboard.length) {
+    bot.sendMessage(msg.chat.id, "No deposits yet.", { parse_mode: "Markdown" });
+    return;
+  }
+  let text = "*Leaderboard (Top Depositors):*\n";
+  leaderboard.forEach((entry, idx) => {
+    text += `${idx + 1}. User ${entry.uid} - Ksh ${entry.total}\n`;
+  });
+  bot.sendMessage(msg.chat.id, text, { parse_mode: "Markdown" });
+});
+
+// ====================
+// REGISTRATION Flow
+// ====================
+bot.onText(/\/register/, (msg) => {
+  const chatId = msg.chat.id;
+  if (chatId === ADMIN_ID) {
+    bot.sendMessage(chatId, "Admin doesn't need to register. Use /admin to see commands.", { parse_mode: "Markdown" });
+    return;
+  }
+  if (bannedUsers[chatId]) {
+    bot.sendMessage(chatId, `You are banned. Reason: ${bannedUsers[chatId].reason}`, { parse_mode: "Markdown" });
+    return;
+  }
+  if (isRegistered(chatId)) {
+    bot.sendMessage(chatId, "You are already registered. Type /start to see the menu.", { parse_mode: "Markdown" });
+    return;
+  }
+  userState[chatId] = { stage: "regFirstName" };
+  bot.sendMessage(chatId, botConfig.registrationWelcome, { parse_mode: "Markdown" });
+});
+
+bot.on("message", (msg) => {
+  const chatId = msg.chat.id;
+  if (msg.text && msg.text.startsWith("/")) return;
+  if (!userState[chatId]) return;
+  if (chatId === ADMIN_ID) return;
+  if (bannedUsers[chatId]) {
+    bot.sendMessage(chatId, `You are banned. Reason: ${bannedUsers[chatId].reason}`, { parse_mode: "Markdown" });
+    delete userState[chatId];
+    return;
+  }
+  const st = userState[chatId];
+  if (st.stage === "regFirstName") {
+    st.firstName = msg.text.trim();
+    st.stage = "regLastName";
+    bot.sendMessage(chatId, botConfig.askLastName, { parse_mode: "Markdown" });
+  } else if (st.stage === "regLastName") {
+    st.lastName = msg.text.trim();
+    st.stage = "regPhone";
+    bot.sendMessage(chatId, botConfig.askPhone, { parse_mode: "Markdown" });
+  } else if (st.stage === "regPhone") {
+    const phone = msg.text.trim();
+    if (!/^(07|01)\d{8}$/.test(phone)) {
+      bot.sendMessage(chatId, "Invalid phone. Must start with 07 or 01 and be 10 digits.", { parse_mode: "Markdown" });
+      return;
+    }
+    userProfiles[chatId] = {
+      firstName: st.firstName,
+      lastName: st.lastName,
+      phone
+    };
+    userBalances[chatId] = userBalances[chatId] || 0;
+    if (!userReferralCodes[chatId]) {
+      userReferralCodes[chatId] = generateReferralCode();
+      userReferralBonuses[chatId] = 0;
+    }
+    const text = parsePlaceholders(botConfig.registrationSuccess, {
+      firstName: st.firstName,
+      lastName: st.lastName,
+      referralCode: userReferralCodes[chatId]
+    });
+    bot.sendMessage(chatId, text, { parse_mode: "Markdown" });
+    logAdmin(`New user registered: ${chatId} (${st.firstName} ${st.lastName})`);
+    delete userState[chatId];
+  }
+});
+
+// If not registered, warn once
 bot.on("message", (msg) => {
   const chatId = msg.chat.id;
   if (chatId === ADMIN_ID) return;
-  if (!isRegistered(chatId)) {
-    // Alert admin once for a new unregistered message.
-    if (!userState[chatId] || userState[chatId].stage !== "notRegisteredWarned") {
-      sendAdminAlert(`New unregistered user contacted bot. Chat ID: ${chatId}\nMessage: ${msg.text}`);
+  if (!isRegistered(chatId) && !msg.text.startsWith("/register")) {
+    if (!userState[chatId]) {
       userState[chatId] = { stage: "notRegisteredWarned" };
+      bot.sendMessage(chatId, "You are not registered. Type /register to begin.", { parse_mode: "Markdown" });
     }
   }
 });
 
 // ====================
 // MAIN MENU
+// ====================
 bot.onText(/\/start/, (msg) => {
-  const chatId = msg.chat.id;
-  if (!isRegistered(chatId)) return;
-  if (bannedUsers[chatId]) {
-    bot.sendMessage(chatId, `You are banned. Reason: ${bannedUsers[chatId].reason}`, { parse_mode: "Markdown" });
-    return;
-  }
-  const fn = userProfiles[chatId]?.firstName || "Investor";
-  const text = parsePlaceholders(botConfig.mainMenuText, { firstName: fn });
-  // 8 menu items:
-  // Mining → auto-invest; Deposit → deposit flow; Referral bonus; Profile; Contact support; Withdrawals; Stats; All Activities.
-  const keyboard = [
-    [{ text: "⛏️ Mining", callback_data: "menu:mining" }, { text: "💰 Deposit", callback_data: "menu:deposit" }],
-    [{ text: "👥 Referral bonus", callback_data: "menu:refBonus" }, { text: "👤 Profile", callback_data: "menu:profile" }],
-    [{ text: "📞 Contact support", callback_data: "menu:contactSupport" }, { text: "💸 Withdrawals", callback_data: "menu:withdraw" }],
-    [{ text: "📊 Stats", callback_data: "menu:stats" }, { text: "📂 All Activities", callback_data: "menu:allActivities" }]
-  ];
-  bot.sendMessage(chatId, text, {
-    reply_markup: { inline_keyboard: keyboard },
-    parse_mode: "Markdown"
+  maintenanceCheck(msg.chat.id, () => {
+    const chatId = msg.chat.id;
+    if (!isRegistered(chatId)) return;
+    if (bannedUsers[chatId]) {
+      bot.sendMessage(chatId, `You are banned. Reason: ${bannedUsers[chatId].reason}`, { parse_mode: "Markdown" });
+      return;
+    }
+    const fn = userProfiles[chatId]?.firstName || "Investor";
+    const text = parsePlaceholders(botConfig.mainMenuText, { firstName: fn });
+    const keyboard = [
+      [{ text: "⛏️ Mining", callback_data: "menu:mining" }, { text: "💰 Deposit", callback_data: "menu:deposit" }],
+      [{ text: "👥 Referral bonus", callback_data: "menu:refBonus" }, { text: "👤 Profile", callback_data: "menu:profile" }],
+      [{ text: "📞 Contact support", callback_data: "menu:contactSupport" }, { text: "💸 Withdrawals", callback_data: "menu:withdraw" }],
+      [{ text: "📊 Stats", callback_data: "menu:stats" }, { text: "📂 All Activities", callback_data: "menu:allActivities" }]
+    ];
+    bot.sendMessage(chatId, text, {
+      reply_markup: { inline_keyboard: keyboard },
+      parse_mode: "Markdown"
+    });
   });
 });
 
@@ -257,6 +446,7 @@ bot.onText(/\/start/, (msg) => {
 // CALLBACK HANDLING (MAIN MENU Options)
 bot.on("callback_query", async (cb) => {
   const chatId = cb.message.chat.id;
+  maintenanceCheck(chatId, () => {}); // If maintenance, callback will not proceed.
   if (!isRegistered(chatId)) return;
   if (bannedUsers[chatId]) {
     bot.sendMessage(chatId, `You are banned. Reason: ${bannedUsers[chatId].reason}`, { parse_mode: "Markdown" });
@@ -329,7 +519,7 @@ bot.on("callback_query", async (cb) => {
         let text = "*Your Activities:*\n";
         hist.forEach((r, i) => {
           const type = (r.package && r.package !== "FromBalance") ? "INVESTMENT" : "DEPOSIT";
-          text += `${i+1}. [${type}] INV: ${r.invCode}, Amount: ${r.amount}, Phone: ${r.depositNumber}, Status: ${r.status}, Date: ${r.date}\n`;
+          text += `${i + 1}. [${type}] INV: ${r.invCode}, Amount: ${r.amount}, Phone: ${r.depositNumber}, Status: ${r.status}, Date: ${r.date}\n`;
         });
         bot.sendMessage(chatId, text, { parse_mode: "Markdown" });
       }
@@ -470,12 +660,11 @@ bot.on("message", (msg) => {
       return;
     }
     st.requestedAmount = amt;
-    // Calculate fee (6% of requested)
+    // Calculate 6% fee
     st.fee = parseFloat((amt * (botConfig.withdrawalFeePercent / 100)).toFixed(2));
     st.finalAmount = parseFloat((amt - st.fee).toFixed(2));
     st.stage = "awaitingWithdrawNumber";
-    bot.sendMessage(chatId, `${botConfig.askWithdrawNumber}\nWithdrawal Fee: ${st.fee} (6% will be deducted)\nYou will receive: Ksh ${st.finalAmount}`, { parse_mode: "Markdown" });
-    // Alert admin immediately for withdrawal request
+    bot.sendMessage(chatId, `${botConfig.askWithdrawNumber}\nWithdrawal Fee: Ksh ${st.fee}\nYou will receive: Ksh ${st.finalAmount}`, { parse_mode: "Markdown" });
     sendAdminAlert(`*Withdrawal Requested:*\nUser: ${chatId}\nRequested: Ksh ${amt}\nFee: Ksh ${st.fee}\nNet: Ksh ${st.finalAmount}`);
   } else if (st.stage === "awaitingWithdrawNumber") {
     const phone = msg.text.trim();
@@ -509,6 +698,7 @@ bot.on("message", (msg) => {
 
 // ====================
 // Extra User Commands
+// ====================
 bot.onText(/\/balance/, (msg) => {
   const chatId = msg.chat.id;
   if (!isRegistered(chatId)) return;
@@ -584,271 +774,110 @@ bot.onText(/\/help/, (msg) => {
   bot.sendMessage(chatId, botConfig.userHelp, { parse_mode: "Markdown" });
 });
 
-// Support ticket
-bot.onText(/\/ticket/, (msg) => {
+// /feedback command – user feedback alerting admin
+bot.onText(/\/feedback (.+)/, (msg, match) => {
   const chatId = msg.chat.id;
   if (!isRegistered(chatId)) return;
-  userState[chatId] = { stage: "ticketMsg" };
-  // Alert admin immediately when a support ticket is requested
-  sendAdminAlert(`Support ticket requested by user ${chatId}.`);
-  bot.sendMessage(chatId, "*Please describe your issue:*", { parse_mode: "Markdown" });
+  const feedback = match[1];
+  bot.sendMessage(chatId, "Thank you for your feedback! 🙏", { parse_mode: "Markdown" });
+  sendAdminAlert(`Feedback from ${chatId}: ${feedback}`);
 });
 
+// /inspire command – send a motivational quote
+bot.onText(/\/inspire/, (msg) => {
+  const chatId = msg.chat.id;
+  const quote = motivationalQuotes[Math.floor(Math.random() * motivationalQuotes.length)];
+  bot.sendMessage(chatId, `💡 *Inspirational Quote:*\n${quote}`, { parse_mode: "Markdown" });
+});
+
+// /about command – about info
+bot.onText(/\/about/, (msg) => {
+  bot.sendMessage(msg.chat.id, "FYS_PROPERTY Investment Bot v1.0\nDeveloped by FY'S PROPERTY 🕊️\nEnjoy our services!", { parse_mode: "Markdown" });
+});
+
+// /uptime command – show bot uptime
+bot.onText(/\/uptime/, (msg) => {
+  const uptime = Math.floor((Date.now() - botStartTime) / 1000);
+  bot.sendMessage(msg.chat.id, `Bot uptime: ${uptime} seconds`, { parse_mode: "Markdown" });
+});
+
+// ====================
+// ADMIN EXTRA COMMANDS
+// ====================
+
+// /adminlog – show admin log (last 10 entries)
+bot.onText(/\/adminlog/, (msg) => {
+  if (msg.from.id !== ADMIN_ID) return;
+  const logText = adminLog.slice(-10).join("\n");
+  bot.sendMessage(ADMIN_ID, `*Admin Log (last 10 entries):*\n${logText}`, { parse_mode: "Markdown" });
+});
+
+// /leaderboard – top 5 users by total deposit
+bot.onText(/\/leaderboard/, (msg) => {
+  const leaderboard = [];
+  for (let uid in depositHistory) {
+    const total = depositHistory[uid].reduce((sum, rec) => sum + rec.amount, 0);
+    leaderboard.push({ uid, total });
+  }
+  leaderboard.sort((a, b) => b.total - a.total);
+  const top5 = leaderboard.slice(0, 5);
+  let text = "*Leaderboard (Top Depositors):*\n";
+  top5.forEach((entry, idx) => {
+    text += `${idx + 1}. User ${entry.uid} - Ksh ${entry.total}\n`;
+  });
+  bot.sendMessage(msg.chat.id, text, { parse_mode: "Markdown" });
+});
+
+// /resetdata – dangerous command to reset all user data (admin only)
+bot.onText(/\/resetdata/, (msg) => {
+  if (msg.from.id !== ADMIN_ID) return;
+  Object.keys(userProfiles).forEach(key => delete userProfiles[key]);
+  Object.keys(userBalances).forEach(key => delete userBalances[key]);
+  Object.keys(depositHistory).forEach(key => delete depositHistory[key]);
+  Object.keys(userReferralCodes).forEach(key => delete userReferralCodes[key]);
+  Object.keys(userReferralBonuses).forEach(key => delete userReferralBonuses[key]);
+  bot.sendMessage(ADMIN_ID, "All user data has been reset.", { parse_mode: "Markdown" });
+  logAdmin("System data reset by admin.");
+});
+
+// /clearhistory <chatId> – clear history for a user
+bot.onText(/\/clearhistory (\d+)/, (msg, match) => {
+  if (msg.from.id !== ADMIN_ID) return;
+  const uid = match[1];
+  delete depositHistory[uid];
+  bot.sendMessage(ADMIN_ID, `Deposit/investment history for user ${uid} cleared.`, { parse_mode: "Markdown" });
+  logAdmin(`Deposit history for user ${uid} cleared.`);
+});
+
+// /exportdata – export current data (logs to console)
+bot.onText(/\/exportdata/, (msg) => {
+  if (msg.from.id !== ADMIN_ID) return;
+  console.log("=== Exported Data ===");
+  console.log("Users:", userProfiles);
+  console.log("Balances:", userBalances);
+  console.log("Deposit History:", depositHistory);
+  console.log("Referral Codes:", userReferralCodes);
+  console.log("Pending Withdrawals:", pendingWithdrawals);
+  bot.sendMessage(ADMIN_ID, "Data exported to console.", { parse_mode: "Markdown" });
+});
+
+// ====================
+// AUTO-REPLY FEATURE: if user sends "hello"
 bot.on("message", (msg) => {
   const chatId = msg.chat.id;
-  if (!userState[chatId]) return;
-  const st = userState[chatId];
-  if (st.stage === "ticketMsg") {
-    const tid = nextTicketID++;
-    supportTickets[tid] = {
-      chatId,
-      message: msg.text,
-      date: new Date().toLocaleString(),
-      status: "pending",
-      reply: ""
-    };
-    bot.sendMessage(chatId, `Support ticket created. ID: ${tid}`, { parse_mode: "Markdown" });
-    sendAdminAlert(`New support ticket (ID: ${tid}) from user ${chatId}:\n${msg.text}`);
-    delete userState[chatId];
+  if (typeof msg.text !== "string") return;
+  if (/^hello$/i.test(msg.text.trim()) && isRegistered(chatId) && !maintenanceMode) {
+    bot.sendMessage(chatId, "Hi there! How can I help you today? 😊", { parse_mode: "Markdown" });
   }
 });
 
 // ====================
-// ADMIN COMMANDS
-bot.onText(/\/admin/, (msg) => {
-  if (msg.from.id === ADMIN_ID) {
-    bot.sendMessage(msg.chat.id, getAdminHelp(), { parse_mode: "Markdown" });
-    bot.sendMessage(msg.chat.id, "Bot is successfully deployed and running!", { parse_mode: "Markdown" });
-  }
-});
-
-// /broadcast [chatId1,chatId2,...] message
-bot.onText(/\/broadcast (.+)/, (msg, match) => {
-  if (msg.from.id !== ADMIN_ID) return;
-  const input = match[1];
-  const start = input.indexOf("[");
-  const end = input.indexOf("]");
-  if (start < 0 || end < 0) {
-    bot.sendMessage(msg.chat.id, "Invalid format. Use: /broadcast [id1,id2] message", { parse_mode: "Markdown" });
-    return;
-  }
-  const arr = input.substring(start + 1, end).split(",").map(x => x.trim());
-  const broadcastText = input.substring(end + 1).trim();
-  arr.forEach(id => {
-    bot.sendMessage(id, `*${botConfig.fromAdmin}:*\n${broadcastText}`, { parse_mode: "Markdown" })
-      .catch(() => bot.sendMessage(msg.chat.id, `Could not message ${id}`, { parse_mode: "Markdown" }));
-  });
-  bot.sendMessage(msg.chat.id, "*Broadcast complete.*", { parse_mode: "Markdown" });
-});
-
-// /broadcastAll <message>
-bot.onText(/\/broadcastAll (.+)/, (msg, match) => {
-  if (msg.from.id !== ADMIN_ID) return;
-  const text = match[1];
-  const allUsers = Object.keys(userProfiles);
-  allUsers.forEach(uid => {
-    bot.sendMessage(uid, `*${botConfig.fromAdmin}:*\n${text}`, { parse_mode: "Markdown" })
-      .catch(() => bot.sendMessage(msg.chat.id, `Could not message ${uid}`, { parse_mode: "Markdown" }));
-  });
-  bot.sendMessage(msg.chat.id, "*Broadcast to all users complete.*", { parse_mode: "Markdown" });
-});
-
-// /addpackage <name> <min>
-bot.onText(/\/addpackage (.+)/, (msg, match) => {
-  if (msg.from.id !== ADMIN_ID) return;
-  const parts = match[1].split(" ");
-  if (parts.length < 2) {
-    bot.sendMessage(msg.chat.id, "Usage: /addpackage <name> <min>", { parse_mode: "Markdown" });
-    return;
-  }
-  const nm = parts[0];
-  const mn = parseInt(parts[1]);
-  if (isNaN(mn)) {
-    bot.sendMessage(msg.chat.id, "Min must be a number.", { parse_mode: "Markdown" });
-    return;
-  }
-  packages.push({ name: nm, min: mn });
-  bot.sendMessage(msg.chat.id, `Package ${nm} added with min Ksh ${mn}`, { parse_mode: "Markdown" });
-});
-
-// /editpackage <name> <newMin>
-bot.onText(/\/editpackage (.+)/, (msg, match) => {
-  if (msg.from.id !== ADMIN_ID) return;
-  const p = match[1].split(" ");
-  if (p.length < 2) {
-    bot.sendMessage(msg.chat.id, "Usage: /editpackage <name> <newMin>", { parse_mode: "Markdown" });
-    return;
-  }
-  const nm = p[0];
-  const mn = parseInt(p[1]);
-  const pkg = packages.find(x => x.name.toLowerCase() === nm.toLowerCase());
-  if (!pkg) {
-    bot.sendMessage(msg.chat.id, "Package not found.", { parse_mode: "Markdown" });
-    return;
-  }
-  pkg.min = mn;
-  bot.sendMessage(msg.chat.id, `Package ${pkg.name} updated to min Ksh ${mn}`, { parse_mode: "Markdown" });
-});
-
-// /referrals => list pending referrals
-bot.onText(/\/referrals/, (msg) => {
-  if (msg.from.id !== ADMIN_ID) return;
-  const keys = Object.keys(referralRequests);
-  if (!keys.length) {
-    bot.sendMessage(msg.chat.id, "No pending referrals.", { parse_mode: "Markdown" });
-    return;
-  }
-  let txt = "*Pending Referrals:*\n";
-  keys.forEach(id => {
-    const r = referralRequests[id];
-    txt += `ID: ${id} | Code: ${r.code} | Referred: ${r.referred} | Status: ${r.status}\n`;
-  });
-  bot.sendMessage(msg.chat.id, txt, { parse_mode: "Markdown" });
-});
-
-// Approve or decline referrals
-bot.onText(/approve (\d+)/, (msg, match) => {
-  if (msg.from.id !== ADMIN_ID) return;
-  const rid = match[1];
-  const rr = referralRequests[rid];
-  if (!rr) {
-    bot.sendMessage(msg.chat.id, "Referral not found.", { parse_mode: "Markdown" });
-    return;
-  }
-  rr.status = "approved";
-  const numeric = parseInt(rr.code.replace("FY'S-", ""));
-  if (!isNaN(numeric)) {
-    if (!userReferralBonuses[numeric]) userReferralBonuses[numeric] = 0;
-    userReferralBonuses[numeric] += botConfig.referralBonus;
-    bot.sendMessage(msg.chat.id, `Referral ${rid} approved. Bonus credited to code ${rr.code}`, { parse_mode: "Markdown" });
-  }
-});
-
-bot.onText(/decline (\d+)/, (msg, match) => {
-  if (msg.from.id !== ADMIN_ID) return;
-  const rid = match[1];
-  const rr = referralRequests[rid];
-  if (!rr) {
-    bot.sendMessage(msg.chat.id, "Referral not found.", { parse_mode: "Markdown" });
-    return;
-  }
-  rr.status = "declined";
-  bot.sendMessage(msg.chat.id, `Referral ${rid} declined.`, { parse_mode: "Markdown" });
-});
-
-// /withdrawlimits
-bot.onText(/\/withdrawlimits/, (msg) => {
-  if (msg.from.id !== ADMIN_ID) return;
-  bot.sendMessage(msg.chat.id, `Min: ${botConfig.withdrawMin}, Max: ${botConfig.withdrawMax}`, { parse_mode: "Markdown" });
-});
-
-// /users => list registered users
-bot.onText(/\/users/, (msg) => {
-  if (msg.from.id !== ADMIN_ID) return;
-  const keys = Object.keys(userProfiles);
-  if (!keys.length) {
-    bot.sendMessage(msg.chat.id, "No users registered.", { parse_mode: "Markdown" });
-    return;
-  }
-  let txt = "*Registered Users:*\n";
-  keys.forEach(k => {
-    const up = userProfiles[k];
-    txt += `• ${k}: ${up.firstName} ${up.lastName}, phone: ${up.phone}\n`;
-  });
-  bot.sendMessage(msg.chat.id, txt, { parse_mode: "Markdown" });
-});
-
-// /adjust <chatId> <amount> to add or deduct balance
-bot.onText(/\/adjust (\d+) (-?\d+)/, (msg, match) => {
-  if (msg.from.id !== ADMIN_ID) return;
-  const uid = match[1];
-  const amt = parseInt(match[2]);
-  if (!userBalances[uid]) userBalances[uid] = 0;
-  userBalances[uid] += amt;
-  bot.sendMessage(msg.chat.id, `User ${uid} new balance: Ksh ${userBalances[uid]}`, { parse_mode: "Markdown" });
-});
-
-// /investment <chatId> => show last investment of a user
-bot.onText(/\/investment (\d+)/, (msg, match) => {
-  if (msg.from.id !== ADMIN_ID) return;
-  const uid = match[1];
-  const hist = depositHistory[uid] || [];
-  if (!hist.length) {
-    bot.sendMessage(msg.chat.id, "No investments found for user.", { parse_mode: "Markdown" });
-    return;
-  }
-  const last = hist[hist.length - 1];
-  bot.sendMessage(msg.chat.id,
-    `INV: ${last.invCode}\nAmount: Ksh ${last.amount}\nPhone: ${last.depositNumber}\nDate: ${last.date}\nStatus: ${last.status}\nMPESA: ${last.mpesaCode || "N/A"}`,
-    { parse_mode: "Markdown" }
-  );
-});
-
-// /tickets => list support tickets
-bot.onText(/\/tickets/, (msg) => {
-  if (msg.from.id !== ADMIN_ID) return;
-  const keys = Object.keys(supportTickets);
-  if (!keys.length) {
-    bot.sendMessage(msg.chat.id, "No support tickets.", { parse_mode: "Markdown" });
-    return;
-  }
-  let txt = "*Support Tickets:*\n";
-  keys.forEach(id => {
-    const t = supportTickets[id];
-    txt += `ID: ${id}, user: ${t.chatId}, date: ${t.date}, status: ${t.status}\nMessage: ${t.message}\n\n`;
-  });
-  bot.sendMessage(msg.chat.id, txt, { parse_mode: "Markdown" });
-});
-
-// replyticket <id> <message>
-bot.onText(/replyticket (\d+) (.+)/, (msg, match) => {
-  if (msg.from.id !== ADMIN_ID) return;
-  const tid = match[1];
-  const rep = match[2];
-  const t = supportTickets[tid];
-  if (!t) {
-    bot.sendMessage(msg.chat.id, "Ticket not found.", { parse_mode: "Markdown" });
-    return;
-  }
-  t.status = "replied";
-  t.reply = rep;
-  bot.sendMessage(msg.chat.id, `Ticket ${tid} replied.`, { parse_mode: "Markdown" });
-  bot.sendMessage(t.chatId, `*Support Ticket Reply*\n${rep}`, { parse_mode: "Markdown" });
-});
-
-// /admin => show admin help
-bot.onText(/\/admin/, (msg) => {
-  if (msg.from.id === ADMIN_ID) {
-    bot.sendMessage(msg.chat.id, getAdminHelp(), { parse_mode: "Markdown" });
-    bot.sendMessage(msg.chat.id, "Bot is successfully deployed and running!", { parse_mode: "Markdown" });
-  }
-});
-
-// edit <key> <newValue>
-bot.onText(/edit (.+)/, (msg, match) => {
-  if (msg.from.id !== ADMIN_ID) return;
-  const input = match[1].split(" ");
-  if (input.length < 2) {
-    bot.sendMessage(msg.chat.id, "Usage: edit <key> <newValue>", { parse_mode: "Markdown" });
-    return;
-  }
-  const key = input[0];
-  const newValue = match[1].substring(key.length).trim();
-  if (!Object.prototype.hasOwnProperty.call(botConfig, key)) {
-    bot.sendMessage(msg.chat.id, "Invalid key.", { parse_mode: "Markdown" });
-    return;
-  }
-  if (["referralBonus","withdrawMin","withdrawMax","profitRate","channelID"].includes(key)) {
-    const valNum = parseInt(newValue);
-    if (isNaN(valNum)) {
-      bot.sendMessage(msg.chat.id, "Value must be a number.", { parse_mode: "Markdown" });
-      return;
-    }
-    botConfig[key] = valNum;
-    bot.sendMessage(msg.chat.id, `${key} updated to ${valNum}`, { parse_mode: "Markdown" });
-  } else {
-    botConfig[key] = newValue;
-    bot.sendMessage(msg.chat.id, `${key} updated.`, { parse_mode: "Markdown" });
+// MAINTENANCE MODE HANDLER
+// ====================
+bot.on("message", (msg) => {
+  const chatId = msg.chat.id;
+  if (maintenanceMode && chatId !== ADMIN_ID) {
+    bot.sendMessage(chatId, maintenanceMessage, { parse_mode: "Markdown" });
   }
 });
 
