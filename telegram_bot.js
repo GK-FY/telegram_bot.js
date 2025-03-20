@@ -1,35 +1,30 @@
 "use strict";
 
-// ====================
-// Import Dependencies
-// ====================
 const TelegramBot = require("node-telegram-bot-api");
 const axios = require("axios");
 
 // ====================
 // CONFIGURATION & CONSTANTS
 // ====================
-
-// Your bot token and admin ID (change if needed)
-const token = "6496106682:AAH4D4yMcYx4FKIyZem5akCQr6swjf_Z6pw";
+const token = "6496106682:AAH4D4yMcYx4FKIyZem5akCQr6swjf_Z6pw"; // Your Bot Token
 const ADMIN_ID = 5415517965; // Admin's Telegram numeric ID
 
-// Maintenance mode variables
+// Maintenance mode settings
 let maintenanceMode = false;
 let maintenanceMessage = "⚙️ The system is under maintenance. Please try again later.";
 
-// Editable configuration (admin can change these using /edit)
+// Editable configuration (admin can change these via /edit)
 let botConfig = {
   // Registration texts
   registrationWelcome: "👋 *Welcome to FYS_PROPERTY Investment Bot!* \nBefore you begin, please register.\nEnter your *first name*:",
   askLastName: "Great! Now, please enter your *last name*:",
   askPhone: "Please enter your *phone number* (must start with 07 or 01, 10 digits):",
   registrationSuccess: "Thank you, *{firstName} {lastName}*! Your registration is complete. Your referral code is *{referralCode}*.\nType /start to see our menu.",
-
+  
   // Main menu text
   mainMenuText: "Hello, *{firstName}*! Please select an option below:",
-
-  // Deposit flow texts
+  
+  // Deposit flow (for adding funds)
   depositIntro: "💰 *Deposit Flow Started!* Please enter the deposit amount in Ksh:",
   depositPhonePrompt: "📱 Now enter your M-PESA phone number (start with 07 or 01):",
   paymentInitiated: "*⏳ Payment initiated!* We'll check status in {seconds} seconds...\n_Stay tuned!_",
@@ -37,34 +32,35 @@ let botConfig = {
   depositSuccess: "*🎉 Deposit Successful!*\n*INV Code:* {invCode}\n*Amount:* Ksh {amount}\n*Phone:* {depositNumber}\n*MPESA Code:* {mpesaCode}\n*Date/Time:* {date}",
   depositErrorMessage: "Sorry, an error occurred during your deposit. Please try again.",
   depositFooter: "Thank you for using FYS_PROPERTY! Type /start to see the menu.",
-
-  // Investment (Mining) texts – auto‑invest triggered by user choice
+  
+  // Invest (auto‑invest via Mining)
   investPrompt: "⛏️ Select a package to invest automatically from your balance:",
   investInsufficient: "*⚠️ You do not have enough balance to invest in {package}. Please deposit first.*",
   investSuccess: "*🎉 Investment Created!*\n*INV Code:* {invCode}\nPackage: {package}\nAmount: Ksh {amount}",
-
-  // Referral texts – code and bonus information
+  
+  // Referral – note: referral codes now use prefix FYSPROP- (no apostrophe)
   referralBonus: 200,
-  botUsername: "shankfy_bot", // used for referral link
-  // Balance message text
+  botUsername: "shankfy_bot", // for referral link
+  
+  // Balance message
   balanceMessage: "*💵 Your current balance is:* Ksh {balance}",
-
-  // Withdrawal texts (6% fee applies)
+  
+  // Withdrawal flow (6% fee applies)
   withdrawPrompt: "💸 *Withdrawal Requested!* Please enter the amount to withdraw (min Ksh {min}, max Ksh {max}):",
   askWithdrawNumber: "Now, enter your M-PESA number (start with 07 or 01, 10 digits):",
   withdrawMin: 1,
   withdrawMax: 75000,
   withdrawalFeePercent: 6,
-
-  // Admin-related text
+  
+  // Admin
   fromAdmin: "shankfy_bot",
-
-  // Extra user help text
-  userHelp: "Main commands:\n/start - Main menu\n/deposit - Deposit funds\n/balance - Check balance\n/withdraw - Request withdrawal\n/invest - Invest from balance\n/history - View your activities\n/myreferral - View your referral code & link\n/profile - View your profile\n/faq - FAQs\n/ticket - Support ticket\n/inspire - Get inspired\n/feedback - Send feedback\n/about - About this bot\n/uptime - Bot uptime"
+  
+  // Extra user help message
+  userHelp: "Main commands:\n/start - Main menu\n/deposit - Deposit funds\n/balance - Check balance\n/withdraw - Request withdrawal\n/invest - Invest from balance\n/history - View your activities\n/myreferral - View your referral code & link\n/generatelink - Request unique referral link\n/profile - View your profile\n/faq - FAQs\n/ticket - Support ticket\n/inspire - Get inspired\n/feedback - Send feedback\n/about - About this bot\n/uptime - Bot uptime"
 };
 
 // ====================
-// EXTRA FEATURES (Quotes, Uptime, etc.)
+// EXTRA FEATURES & UTILITY FUNCTIONS
 // ====================
 const motivationalQuotes = [
   "Believe you can and you're halfway there. – Theodore Roosevelt",
@@ -74,11 +70,38 @@ const motivationalQuotes = [
   "Dream it. Wish it. Do it."
 ];
 
-// ====================
-// DATA STORAGE (In-Memory)
-// ====================
+let adminLog = [];
+const botStartTime = Date.now();
 
-// User profiles, states, balances, history, referrals, support tickets, etc.
+function getUptime() {
+  const diff = Date.now() - botStartTime;
+  const seconds = Math.floor(diff / 1000) % 60;
+  const minutes = Math.floor(diff / (1000 * 60)) % 60;
+  const hours = Math.floor(diff / (1000 * 60 * 60));
+  return `${hours}h ${minutes}m ${seconds}s`;
+}
+
+function getRandomQuote() {
+  return motivationalQuotes[Math.floor(Math.random() * motivationalQuotes.length)];
+}
+
+function getAbout() {
+  return "FYS_PROPERTY Investment Bot v1.0\nDeveloped by FY'S PROPERTY 🕊️\nEnjoy our services!";
+}
+
+function getLeaderboard() {
+  let leaderboard = [];
+  for (let uid in depositHistory) {
+    const total = depositHistory[uid].reduce((sum, rec) => sum + rec.amount, 0);
+    leaderboard.push({ uid, total });
+  }
+  leaderboard.sort((a, b) => b.total - a.total);
+  return leaderboard.slice(0, 5);
+}
+
+// ====================
+// DATA STORAGE (In-memory)
+// ====================
 const userProfiles = {};         // { chatId: { firstName, lastName, phone } }
 const userState = {};            // { chatId: { stage, ... } }
 const userBalances = {};         // { chatId: number }
@@ -93,7 +116,7 @@ let supportTickets = {};         // { id: { chatId, message, date, status, reply
 let nextTicketID = 1;
 const bannedUsers = {};          // { chatId: { reason, date } }
 
-// Investment packages available for auto-investment
+// Investment packages
 let packages = [
   { name: "Package 1", min: 1 },
   { name: "Package 2", min: 2 },
@@ -101,13 +124,10 @@ let packages = [
 ];
 
 // ====================
-// BOT INITIALIZATION
+// BOT CREATION
 // ====================
 const bot = new TelegramBot(token, { polling: true });
 console.log("FYS_PROPERTY Bot is starting...");
-
-// Notify admin on startup
-bot.sendMessage(ADMIN_ID, "*Bot is successfully deployed and running!* Use /admin to see admin commands.", { parse_mode: "Markdown" });
 
 // ====================
 // MAINTENANCE MODE CHECK
@@ -133,7 +153,6 @@ function logAdmin(message) {
 // ====================
 // HELPER FUNCTIONS
 // ====================
-
 function parsePlaceholders(template, data) {
   return template
     .replace(/{firstName}/g, data.firstName || "")
@@ -169,13 +188,13 @@ function generateInvestmentCode() {
   return "INV-" + Math.floor(1000000 + Math.random() * 9000000);
 }
 
-// Use a referral prefix that avoids apostrophes for Markdown safety.
+// Use referral prefix without apostrophes
 function generateReferralCode() {
   return "FYSPROP-" + Math.floor(10000 + Math.random() * 90000);
 }
 
 // ====================
-// STK PUSH FUNCTION (For Deposit Flow)
+// STK PUSH (Deposit)
 // ====================
 async function sendSTKPush(amount, depositNumber) {
   const formatted = formatPhoneNumber(depositNumber);
@@ -226,42 +245,19 @@ function sendAdminAlert(text) {
 }
 
 // ====================
-// EXTRA COMMANDS & FEATURES
+// EXTRA FEATURES / COMMANDS
 // ====================
-
-// Uptime command: /uptime
-function getUptime() {
-  const diff = Date.now() - botStartTime;
-  const seconds = Math.floor(diff / 1000) % 60;
-  const minutes = Math.floor(diff / (1000 * 60)) % 60;
-  const hours = Math.floor(diff / (1000 * 60 * 60));
-  return `${hours}h ${minutes}m ${seconds}s`;
-}
-
 bot.onText(/\/uptime/, (msg) => {
   bot.sendMessage(msg.chat.id, `Bot uptime: ${getUptime()}`, { parse_mode: "Markdown" });
 });
 
-// Inspirational quote: /inspire
 bot.onText(/\/inspire/, (msg) => {
   bot.sendMessage(msg.chat.id, `💡 *Inspirational Quote:*\n${getRandomQuote()}`, { parse_mode: "Markdown" });
 });
 
-// About command: /about
 bot.onText(/\/about/, (msg) => {
   bot.sendMessage(msg.chat.id, getAbout(), { parse_mode: "Markdown" });
 });
-
-// Leaderboard: /leaderboard
-function getLeaderboard() {
-  let leaderboard = [];
-  for (let uid in depositHistory) {
-    const total = depositHistory[uid].reduce((sum, rec) => sum + rec.amount, 0);
-    leaderboard.push({ uid, total });
-  }
-  leaderboard.sort((a, b) => b.total - a.total);
-  return leaderboard.slice(0, 5);
-}
 
 bot.onText(/\/leaderboard/, (msg) => {
   const lb = getLeaderboard();
@@ -276,14 +272,60 @@ bot.onText(/\/leaderboard/, (msg) => {
   bot.sendMessage(msg.chat.id, text, { parse_mode: "Markdown" });
 });
 
-// Admin log: /adminlog
+// ====================
+// NEW FEATURE: Referral Link Generation (Admin only)
+// ====================
+// When a user sends /generatelink, they request a unique referral link.
+// The bot alerts admin so that admin can generate a unique referral link for that user.
+bot.onText(/\/generatelink/, (msg) => {
+  const chatId = msg.chat.id;
+  if (!isRegistered(chatId)) return;
+  sendAdminAlert(`User ${chatId} has requested a unique referral link. Use /genlink ${chatId} to generate it.`);
+  bot.sendMessage(chatId, "Your request for a unique referral link has been sent to admin. Please wait.", { parse_mode: "Markdown" });
+});
+
+// Admin command: /genlink <chatId>
+bot.onText(/\/genlink (\d+)/, (msg, match) => {
+  if (msg.from.id !== ADMIN_ID) return;
+  const uid = match[1];
+  if (!isRegistered(uid)) {
+    bot.sendMessage(ADMIN_ID, "User not registered.", { parse_mode: "Markdown" });
+    return;
+  }
+  const newCode = generateReferralCode();
+  userReferralCodes[uid] = newCode;
+  bot.sendMessage(uid, `Your unique referral link has been generated: https://t.me/${botConfig.botUsername}?start=${newCode}`, { parse_mode: "Markdown" });
+  bot.sendMessage(ADMIN_ID, `Unique referral link generated for user ${uid}: ${newCode}`, { parse_mode: "Markdown" });
+});
+
+// ====================
+// ADMIN LOG / DATA EXPORT
+// ====================
 bot.onText(/\/adminlog/, (msg) => {
   if (msg.from.id !== ADMIN_ID) return;
   const logText = adminLog.slice(-10).join("\n");
   bot.sendMessage(ADMIN_ID, `*Admin Log (last 10 entries):*\n${logText}`, { parse_mode: "Markdown" });
 });
 
-// Data export: /exportdata
+bot.onText(/\/resetdata/, (msg) => {
+  if (msg.from.id !== ADMIN_ID) return;
+  Object.keys(userProfiles).forEach(key => delete userProfiles[key]);
+  Object.keys(userBalances).forEach(key => delete userBalances[key]);
+  Object.keys(depositHistory).forEach(key => delete depositHistory[key]);
+  Object.keys(userReferralCodes).forEach(key => delete userReferralCodes[key]);
+  Object.keys(userReferralBonuses).forEach(key => delete userReferralBonuses[key]);
+  bot.sendMessage(ADMIN_ID, "All user data has been reset.", { parse_mode: "Markdown" });
+  logAdmin("System data reset by admin.");
+});
+
+bot.onText(/\/clearhistory (\d+)/, (msg, match) => {
+  if (msg.from.id !== ADMIN_ID) return;
+  const uid = match[1];
+  delete depositHistory[uid];
+  bot.sendMessage(ADMIN_ID, `Deposit/investment history for user ${uid} cleared.`, { parse_mode: "Markdown" });
+  logAdmin(`Deposit history for user ${uid} cleared.`);
+});
+
 bot.onText(/\/exportdata/, (msg) => {
   if (msg.from.id !== ADMIN_ID) return;
   console.log("=== Exported Data ===");
@@ -296,47 +338,131 @@ bot.onText(/\/exportdata/, (msg) => {
 });
 
 // ====================
-// MAINTENANCE MODE COMMANDS (Admin Only)
+// ADMIN COMMANDS (Broadcast, Package, Adjust, etc.)
 // ====================
-bot.onText(/\/maintenance (on|off)/, (msg, match) => {
+bot.onText(/\/broadcast (.+)/, (msg, match) => {
   if (msg.from.id !== ADMIN_ID) return;
-  maintenanceMode = (match[1] === "on");
-  bot.sendMessage(ADMIN_ID, `Maintenance mode turned ${maintenanceMode ? "ON" : "OFF"}.`, { parse_mode: "Markdown" });
+  const input = match[1];
+  const start = input.indexOf("[");
+  const end = input.indexOf("]");
+  if (start < 0 || end < 0) {
+    bot.sendMessage(msg.chat.id, "Invalid format. Use: /broadcast [id1,id2] message", { parse_mode: "Markdown" });
+    return;
+  }
+  const arr = input.substring(start + 1, end).split(",").map(x => x.trim());
+  const broadcastText = input.substring(end + 1).trim();
+  arr.forEach(id => {
+    bot.sendMessage(id, `*${botConfig.fromAdmin}:*\n${broadcastText}`, { parse_mode: "Markdown" })
+      .catch(() => bot.sendMessage(msg.chat.id, `Could not message ${id}`, { parse_mode: "Markdown" }));
+  });
+  bot.sendMessage(msg.chat.id, "*Broadcast complete.*", { parse_mode: "Markdown" });
 });
 
-bot.onText(/\/maintenanceMsg (.+)/, (msg, match) => {
+bot.onText(/\/broadcastAll (.+)/, (msg, match) => {
   if (msg.from.id !== ADMIN_ID) return;
-  maintenanceMessage = match[1];
-  bot.sendMessage(ADMIN_ID, `Maintenance message updated to: ${maintenanceMessage}`, { parse_mode: "Markdown" });
+  const text = match[1];
+  const allUsers = Object.keys(userProfiles);
+  allUsers.forEach(uid => {
+    bot.sendMessage(uid, `*${botConfig.fromAdmin}:*\n${text}`, { parse_mode: "Markdown" })
+      .catch(() => bot.sendMessage(msg.chat.id, `Could not message ${uid}`, { parse_mode: "Markdown" }));
+  });
+  bot.sendMessage(msg.chat.id, "*Broadcast to all users complete.*", { parse_mode: "Markdown" });
 });
 
-// ====================
-// SUPPORT TICKET FLOW
-// ====================
-bot.onText(/\/ticket/, (msg) => {
-  const chatId = msg.chat.id;
-  if (!isRegistered(chatId)) return;
-  userState[chatId] = { stage: "ticketMsg" };
-  sendAdminAlert(`Support ticket requested by user ${chatId}.`);
-  bot.sendMessage(chatId, "*Please describe your issue:*", { parse_mode: "Markdown" });
+bot.onText(/\/addpackage (.+)/, (msg, match) => {
+  if (msg.from.id !== ADMIN_ID) return;
+  const parts = match[1].split(" ");
+  if (parts.length < 2) {
+    bot.sendMessage(msg.chat.id, "Usage: /addpackage <name> <min>", { parse_mode: "Markdown" });
+    return;
+  }
+  const nm = parts[0];
+  const mn = parseInt(parts[1]);
+  if (isNaN(mn)) {
+    bot.sendMessage(msg.chat.id, "Min must be a number.", { parse_mode: "Markdown" });
+    return;
+  }
+  packages.push({ name: nm, min: mn });
+  bot.sendMessage(msg.chat.id, `Package ${nm} added with min Ksh ${mn}`, { parse_mode: "Markdown" });
 });
 
-bot.on("message", (msg) => {
-  const chatId = msg.chat.id;
-  if (!userState[chatId]) return;
-  const st = userState[chatId];
-  if (st.stage === "ticketMsg") {
-    const tid = nextTicketID++;
-    supportTickets[tid] = {
-      chatId,
-      message: msg.text,
-      date: new Date().toLocaleString(),
-      status: "pending",
-      reply: ""
-    };
-    bot.sendMessage(chatId, `Support ticket created. ID: ${tid}`, { parse_mode: "Markdown" });
-    sendAdminAlert(`New support ticket (ID: ${tid}) from user ${chatId}:\n${msg.text}`);
-    delete userState[chatId];
+bot.onText(/\/editpackage (.+)/, (msg, match) => {
+  if (msg.from.id !== ADMIN_ID) return;
+  const p = match[1].split(" ");
+  if (p.length < 2) {
+    bot.sendMessage(msg.chat.id, "Usage: /editpackage <name> <newMin>", { parse_mode: "Markdown" });
+    return;
+  }
+  const nm = p[0];
+  const mn = parseInt(p[1]);
+  const pkg = packages.find(x => x.name.toLowerCase() === nm.toLowerCase());
+  if (!pkg) {
+    bot.sendMessage(msg.chat.id, "Package not found.", { parse_mode: "Markdown" });
+    return;
+  }
+  pkg.min = mn;
+  bot.sendMessage(msg.chat.id, `Package ${pkg.name} updated to min Ksh ${mn}`, { parse_mode: "Markdown" });
+});
+
+bot.onText(/\/adjust (\d+) (-?\d+)/, (msg, match) => {
+  if (msg.from.id !== ADMIN_ID) return;
+  const uid = match[1];
+  const amt = parseInt(match[2]);
+  if (!userBalances[uid]) userBalances[uid] = 0;
+  userBalances[uid] += amt;
+  bot.sendMessage(msg.chat.id, `User ${uid} new balance: Ksh ${userBalances[uid]}`, { parse_mode: "Markdown" });
+});
+
+bot.onText(/\/investment (\d+)/, (msg, match) => {
+  if (msg.from.id !== ADMIN_ID) return;
+  const uid = match[1];
+  const hist = depositHistory[uid] || [];
+  if (!hist.length) {
+    bot.sendMessage(msg.chat.id, "No investments found for user.", { parse_mode: "Markdown" });
+    return;
+  }
+  const last = hist[hist.length - 1];
+  bot.sendMessage(msg.chat.id,
+    `INV: ${last.invCode}\nAmount: Ksh ${last.amount}\nPhone: ${last.depositNumber}\nDate: ${last.date}\nStatus: ${last.status}\nMPESA: ${last.mpesaCode || "N/A"}`,
+    { parse_mode: "Markdown" }
+  );
+});
+
+bot.onText(/\/tickets/, (msg) => {
+  if (msg.from.id !== ADMIN_ID) return;
+  const keys = Object.keys(supportTickets);
+  if (!keys.length) {
+    bot.sendMessage(msg.chat.id, "No support tickets.", { parse_mode: "Markdown" });
+    return;
+  }
+  let txt = "*Support Tickets:*\n";
+  keys.forEach(id => {
+    const t = supportTickets[id];
+    txt += `ID: ${id}, user: ${t.chatId}, date: ${t.date}, status: ${t.status}\nMessage: ${t.message}\n\n`;
+  });
+  bot.sendMessage(msg.chat.id, txt, { parse_mode: "Markdown" });
+});
+
+bot.onText(/\/replyticket (\d+) (.+)/, (msg, match) => {
+  if (msg.from.id !== ADMIN_ID) return;
+  const tid = match[1];
+  const rep = match[2];
+  const t = supportTickets[tid];
+  if (!t) {
+    bot.sendMessage(msg.chat.id, "Ticket not found.", { parse_mode: "Markdown" });
+    return;
+  }
+  t.status = "replied";
+  t.reply = rep;
+  bot.sendMessage(msg.chat.id, `Ticket ${tid} replied.`, { parse_mode: "Markdown" });
+  bot.sendMessage(t.chatId, `*Support Ticket Reply*\n${rep}`, { parse_mode: "Markdown" });
+});
+
+// /admin – Show admin help and status (must type /admin exactly)
+bot.onText(/\/admin$/, (msg) => {
+  if (msg.from.id === ADMIN_ID) {
+    bot.sendMessage(msg.chat.id, getAdminHelp(), { parse_mode: "Markdown" });
+    bot.sendMessage(msg.chat.id, "Bot is successfully deployed and running!", { parse_mode: "Markdown" });
   }
 });
 
@@ -446,11 +572,11 @@ bot.onText(/\/start/, (msg) => {
 });
 
 // ====================
-// CALLBACK HANDLING (MAIN MENU OPTIONS)
+// CALLBACK HANDLING (Main Menu Options)
 // ====================
 bot.on("callback_query", async (cb) => {
   const chatId = cb.message.chat.id;
-  maintenanceCheck(chatId, () => {});
+  maintenanceCheck(chatId, () => {}); // If maintenance, non-admin users get maintenance message.
   if (!isRegistered(chatId)) return;
   if (bannedUsers[chatId]) {
     bot.sendMessage(chatId, `You are banned. Reason: ${bannedUsers[chatId].reason}`, { parse_mode: "Markdown" });
@@ -648,7 +774,7 @@ bot.on("message", async (msg) => {
 });
 
 // ====================
-// WITHDRAWAL FLOW (6% fee)
+// WITHDRAWAL FLOW (with 6% fee)
 // ====================
 bot.on("message", (msg) => {
   const chatId = msg.chat.id;
@@ -705,8 +831,6 @@ bot.on("message", (msg) => {
 // ====================
 // EXTRA USER COMMANDS
 // ====================
-
-// /balance
 bot.onText(/\/balance/, (msg) => {
   const chatId = msg.chat.id;
   if (!isRegistered(chatId)) return;
@@ -714,7 +838,6 @@ bot.onText(/\/balance/, (msg) => {
   bot.sendMessage(chatId, parsePlaceholders(botConfig.balanceMessage, { balance: String(bal) }), { parse_mode: "Markdown" });
 });
 
-// /packages
 bot.onText(/\/packages/, (msg) => {
   const chatId = msg.chat.id;
   if (!isRegistered(chatId)) return;
@@ -725,7 +848,6 @@ bot.onText(/\/packages/, (msg) => {
   bot.sendMessage(chatId, txt, { parse_mode: "Markdown" });
 });
 
-// /history – view deposits/investments
 bot.onText(/\/history/, (msg) => {
   const chatId = msg.chat.id;
   if (!isRegistered(chatId)) return;
@@ -742,7 +864,28 @@ bot.onText(/\/history/, (msg) => {
   bot.sendMessage(chatId, text, { parse_mode: "Markdown" });
 });
 
-// /myreferral – show referral code and link
+// Modified referral: Instead of auto-generating, user can request a unique referral link using /generatelink.
+bot.onText(/\/generatelink/, (msg) => {
+  const chatId = msg.chat.id;
+  if (!isRegistered(chatId)) return;
+  sendAdminAlert(`User ${chatId} has requested a unique referral link. Use /genlink ${chatId} to generate it.`);
+  bot.sendMessage(chatId, "Your request for a unique referral link has been sent to admin. Please wait.", { parse_mode: "Markdown" });
+});
+
+// Admin command to generate a referral link for a user
+bot.onText(/\/genlink (\d+)/, (msg, match) => {
+  if (msg.from.id !== ADMIN_ID) return;
+  const uid = match[1];
+  if (!isRegistered(uid)) {
+    bot.sendMessage(ADMIN_ID, "User not registered.", { parse_mode: "Markdown" });
+    return;
+  }
+  const newCode = generateReferralCode();
+  userReferralCodes[uid] = newCode;
+  bot.sendMessage(uid, `Your unique referral link has been generated: https://t.me/${botConfig.botUsername}?start=${newCode}`, { parse_mode: "Markdown" });
+  bot.sendMessage(ADMIN_ID, `Unique referral link generated for user ${uid}: ${newCode}`, { parse_mode: "Markdown" });
+});
+
 bot.onText(/\/myreferral/, (msg) => {
   const chatId = msg.chat.id;
   if (!isRegistered(chatId)) return;
@@ -756,7 +899,6 @@ bot.onText(/\/myreferral/, (msg) => {
   bot.sendMessage(chatId, `Your referral code: ${code}\nBonus Earned: Ksh ${bonus}\nReferral Link: ${link}`, { parse_mode: "Markdown" });
 });
 
-// /interest – estimated monthly interest (5% of balance)
 bot.onText(/\/interest/, (msg) => {
   const chatId = msg.chat.id;
   if (!isRegistered(chatId)) return;
@@ -765,7 +907,6 @@ bot.onText(/\/interest/, (msg) => {
   bot.sendMessage(chatId, `Estimated monthly interest on your balance: Ksh ${interest}`, { parse_mode: "Markdown" });
 });
 
-// /profile – show user profile
 bot.onText(/\/profile/, (msg) => {
   const chatId = msg.chat.id;
   if (!isRegistered(chatId)) return;
@@ -775,14 +916,12 @@ bot.onText(/\/profile/, (msg) => {
   bot.sendMessage(chatId, `*Profile*\nName: ${up.firstName} ${up.lastName}\nPhone: ${up.phone}\nBalance: Ksh ${bal}\nActivities: ${c}`, { parse_mode: "Markdown" });
 });
 
-// /faq – placeholder FAQ
 bot.onText(/\/faq/, (msg) => {
   const chatId = msg.chat.id;
   if (!isRegistered(chatId)) return;
   bot.sendMessage(chatId, "*FAQ placeholder.*", { parse_mode: "Markdown" });
 });
 
-// /help – display help
 bot.onText(/\/help/, (msg) => {
   const chatId = msg.chat.id;
   if (!isRegistered(chatId)) return;
@@ -790,7 +929,7 @@ bot.onText(/\/help/, (msg) => {
 });
 
 // ====================
-// SUPPORT TICKET FLOW (also available via /ticket)
+// SUPPORT TICKET FLOW
 // ====================
 bot.onText(/\/ticket/, (msg) => {
   const chatId = msg.chat.id;
