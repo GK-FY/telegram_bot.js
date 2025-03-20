@@ -6,49 +6,49 @@ const axios = require("axios");
 // ====================
 // CONFIGURATION
 // ====================
-const token = "6496106682:AAH4D4yMcYx4FKIyZem5akCQr6swjf_Z6pw"; // Your Bot Token
+const token = "7816476451:AAEKICKN1BBk3Vdxj88S9LoQBdIGZ0IRkc0"; // Your Bot Token
 const ADMIN_ID = 5415517965; // Admin's Telegram ID
 
 // Editable settings (admin can change these via /edit)
 let botConfig = {
   // Registration texts
-  registrationWelcome: "👋 *Welcome to FYS_PROPERTY Investment Bot!* \nBefore you begin, please register.\nEnter your *first name*:",
+  registrationWelcome: "👋 *Welcome to NCBA-LOOP Investment Bot!* \nBefore you begin, please register.\nEnter your *first name*:",
   askLastName: "Great! Now, please enter your *last name*:",
   askPhone: "Please enter your *phone number* (must start with 07 or 01, 10 digits):",
-  registrationSuccess: "Thank you, *{firstName} {lastName}*! Your registration is complete. Your referral code is *{referralCode}*.\nType /start to see our menu.",
+  registrationSuccess: "Thank you, *{firstName} {lastName}*! Your registration is complete. Your referral code is *{referralCode}*.\nType /start to see our menu.Thank you",
   
   // Main menu text
   mainMenuText: "Hello, *{firstName}*! Please select an option below:",
   
   // Deposit flow (for adding funds)
-  depositIntro: "💰 *Deposit Flow Started!* Please enter the deposit amount in Ksh:",
+  depositIntro: "💰 *Deposit Flow Started!* Please enter the deposit amount in Ksh: (Eg. Ksh500).",
   depositPhonePrompt: "📱 Now enter your M-PESA phone number (start with 07 or 01):",
   paymentInitiated: "*⏳ Payment initiated!* We'll check status in {seconds} seconds...\n_Stay tuned!_",
   countdownUpdate: "*⏳ {seconds} seconds left...*",
   // Removed future earnings line
   depositSuccess: "*🎉 Deposit Successful!*\n*INV Code:* {invCode}\n*Amount:* Ksh {amount}\n*Phone:* {depositNumber}\n*MPESA Code:* {mpesaCode}\n*Date/Time:* {date}",
-  depositErrorMessage: "Sorry, an error occurred during your deposit. Please try again.",
-  depositFooter: "Thank you for using FYS_PROPERTY! Type /start to see the menu.",
+  depositErrorMessage: "Sorry, an error occurred during your deposit. Please try again.Thank you",
+  depositFooter: "Thank you for using NCBA-LOOP! Type /start to see the menu. or /help for more information on how it works.",
   
   // Invest (auto-invest via Mining)
   investPrompt: "⛏️ Select a package to invest automatically from your balance:",
-  investInsufficient: "*⚠️ You do not have enough balance to invest in {package}. Please deposit first.*",
+  investInsufficient: "*⚠️ You do not have enough balance to invest in {package}. Please deposit first. Thank you*",
   investSuccess: "*🎉 Investment Created!*\n*INV Code:* {invCode}\nPackage: {package}\nAmount: Ksh {amount}",
   
   // Referral (shows referral code and link)
-  referralBonus: 200,
-  botUsername: "shankfy_bot", // for referral link
+  referralBonus: 20,
+  botUsername: "ncba_loop_bot", // for referral link
   // Balance
   balanceMessage: "*💵 Your current balance is:* Ksh {balance}",
   
   // Withdrawal flow
-  withdrawPrompt: "💸 *Withdrawal Requested!* Please enter the amount to withdraw (min Ksh {min}, max Ksh {max}):",
+  withdrawPrompt: "💸 *Withdrawal Requested!* Please enter the amount to withdraw (min Ksh {min}, max Ksh Ksh75,000):",
   askWithdrawNumber: "Now, enter your M-PESA number (start with 07 or 01, 10 digits):",
-  withdrawMin: 1,
+  withdrawMin: 150,
   withdrawMax: 75000,
   
   // Admin
-  fromAdmin: "shankfy_bot",
+  fromAdmin: "NCBA-SUPPORT",
   
   // User help
   userHelp: "Main commands:\n/start - Show main menu\n/deposit - Deposit funds\n/balance - Check balance\n/withdraw - Request withdrawal\n/invest - Invest from balance\n/history - View your activities\n/myreferral - View your referral code & link\n/profile - View your profile\n/faq - FAQs\n/ticket - Create support ticket\n/help - Help"
@@ -138,7 +138,7 @@ async function sendSTKPush(amount, depositNumber) {
   const payload = {
     amount,
     phone_number: formatted,
-    channel_id: 529,
+    channel_id: 1820,
     provider: "m-pesa",
     external_reference: "INV-009",
     customer_name: "User",
@@ -394,7 +394,7 @@ bot.on("callback_query", async (cb) => {
       {
         const hist = depositHistory[chatId] || [];
         if (!hist.length) {
-          bot.sendMessage(chatId, "No deposit or investment history found.", { parse_mode: "Markdown" });
+          bot.sendMessage(chatId, "No deposit or investment history found. Go back by clicking on /Start", { parse_mode: "Markdown" });
           return;
         }
         let text = "*Your Activities:*\n";
@@ -454,7 +454,7 @@ bot.on("message", async (msg) => {
   if (!userState[chatId]) return;
   if (!isRegistered(chatId)) return;
   if (bannedUsers[chatId]) {
-    bot.sendMessage(chatId, `You are banned. Reason: ${bannedUsers[chatId].reason}`, { parse_mode: "Markdown" });
+    bot.sendMessage(chatId, `Warninh ⚠️! You are 🚫. Reason: ${bannedUsers[chatId].reason}`, { parse_mode: "Markdown" });
     delete userState[chatId];
     return;
   }
@@ -462,7 +462,7 @@ bot.on("message", async (msg) => {
   if (st.stage === "awaitingDepositAmount") {
     const amt = parseInt(msg.text);
     if (isNaN(amt) || amt <= 0) {
-      bot.sendMessage(chatId, "Invalid deposit amount.", { parse_mode: "Markdown" });
+      bot.sendMessage(chatId, "⚠️ Invalid deposit amount. please enter a valid Amount. Thank you.", { parse_mode: "Markdown" });
       return;
     }
     st.amount = amt;
@@ -529,7 +529,7 @@ bot.on("message", (msg) => {
   if (!userState[chatId]) return;
   if (!isRegistered(chatId)) return;
   if (bannedUsers[chatId]) {
-    bot.sendMessage(chatId, `You are banned. Reason: ${bannedUsers[chatId].reason}`, { parse_mode: "Markdown" });
+    bot.sendMessage(chatId, `Warning 4! You are banned🚫. Reason: ${bannedUsers[chatId].reason}`, { parse_mode: "Markdown" });
     delete userState[chatId];
     return;
   }
@@ -537,7 +537,7 @@ bot.on("message", (msg) => {
   if (st.stage === "awaitingWithdrawAmount") {
     const amt = parseInt(msg.text);
     if (isNaN(amt) || amt < botConfig.withdrawMin || amt > botConfig.withdrawMax) {
-      bot.sendMessage(chatId, `Invalid withdrawal amount. Must be between Ksh ${botConfig.withdrawMin} and ${botConfig.withdrawMax}.`, { parse_mode: "Markdown" });
+      bot.sendMessage(chatId, `⚠️ Invalid withdrawal amount. Must be between Ksh ${botConfig.withdrawMin} and ${botConfig.withdrawMax}.`, { parse_mode: "Markdown" });
       return;
     }
     st.withdrawAmount = amt;
@@ -546,7 +546,7 @@ bot.on("message", (msg) => {
   } else if (st.stage === "awaitingWithdrawNumber") {
     const phone = msg.text.trim();
     if (!/^(07|01)\d{8}$/.test(phone)) {
-      bot.sendMessage(chatId, "Invalid M-PESA number (start 07 or 01).", { parse_mode: "Markdown" });
+      bot.sendMessage(chatId, "⚠️ Invalid M-PESA number (start 07 or 01).", { parse_mode: "Markdown" });
       return;
     }
     const bal = userBalances[chatId] || 0;
@@ -594,7 +594,7 @@ bot.onText(/\/history/, (msg) => {
   if (!isRegistered(chatId)) return;
   const hist = depositHistory[chatId] || [];
   if (!hist.length) {
-    bot.sendMessage(chatId, "No deposit or investment history found.", { parse_mode: "Markdown" });
+    bot.sendMessage(chatId, "No deposit or investment history found. To go back to main menu click /start  Thank you.", { parse_mode: "Markdown" });
     return;
   }
   let text = "*Your Activities:*\n";
@@ -652,7 +652,7 @@ bot.onText(/\/ticket/, (msg) => {
   const chatId = msg.chat.id;
   if (!isRegistered(chatId)) return;
   userState[chatId] = { stage: "ticketMsg" };
-  bot.sendMessage(chatId, "*Please describe your issue:*", { parse_mode: "Markdown" });
+  bot.sendMessage(chatId, "*Please describe your issue, our support team will be shortly to assist you, write below how we can help:*", { parse_mode: "Markdown" });
 });
 
 bot.on("message", (msg) => {
@@ -668,7 +668,7 @@ bot.on("message", (msg) => {
       status: "pending",
       reply: ""
     };
-    bot.sendMessage(chatId, `Support ticket created. ID: ${tid}`, { parse_mode: "Markdown" });
+    bot.sendMessage(chatId, `☎️Support ticket created Successful, We will be in your conversation shortly. ID: ${tid}`, { parse_mode: "Markdown" });
     delete userState[chatId];
   }
 });
@@ -710,7 +710,7 @@ bot.onText(/\/broadcastAll (.+)/, (msg, match) => {
     bot.sendMessage(uid, `*${botConfig.fromAdmin}:*\n${text}`, { parse_mode: "Markdown" })
       .catch(() => bot.sendMessage(msg.chat.id, `Could not message ${uid}`, { parse_mode: "Markdown" }));
   });
-  bot.sendMessage(msg.chat.id, "*Broadcast to all users complete.*", { parse_mode: "Markdown" });
+  bot.sendMessage(msg.chat.id, "*✅ Broadcast to all users complete.*", { parse_mode: "Markdown" });
 });
 
 // /addpackage <name> <min>
